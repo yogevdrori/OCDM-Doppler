@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- project additions ---
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+.DS_Store
