@@ -66,16 +66,17 @@ rather than just re-reading the papers:
 
 1. **Step 1 (done)** — simulation infrastructure: signal model, analytical
    AF, CB-SFS. See "Status" below.
-2. **Step 2 (next)** — implement the Section-4 curve-fitting estimator on
+2. **Step 2 (done)** — implement the Section-4 curve-fitting estimator on
    top of Step 1 and reproduce Zikun's key numbers: noiseless NMSE ~4.9,
    and the noisy case where CB-SFS strongly outperforms curve-fitting.
-3. **Step 3 (optional, strengthens the proposal)** — build an early-late
-   discriminator S-curve as a proof-of-concept for the loop approach.
+3. **Step 3 (next; optional, strengthens the proposal)** — build an
+   early-late discriminator S-curve as a proof-of-concept for the loop
+   approach.
 4. **Step 4** — present the reproduction + loop proposal to Ron.
 5. **Step 5** — full closed-loop detector development (the actual project
    deliverable).
 
-## Status: Step 1 complete
+## Status: Steps 1 and 2 complete (Step 1 details below)
 
 Package `ocdm_doppler/` (this directory), pure NumPy, no third-party deps
 beyond `numpy`. 9/9 sanity checks pass (`python verify_infrastructure.py`).
@@ -95,14 +96,35 @@ harmonic-leverage-vs-decay tradeoff table, and the open question about
 whether the AF-magnitude average should take `|.|` inside or outside the
 sum).
 
-Added after Step 1 (new files, Step-1 modules untouched):
-`af_estimation.py` (Step 2(a)–(b) of the results docs — time selection,
-lag grid, empirical AF, window detection; places the time origin at received
-symbol K so the ±(N_avg-1)/2 average never runs into negative symbol
-indices) and `../make_figures.py`, which reproduces every results-doc figure
-into `../figures/`. The reproduced figures match the documents, and they show
-that the AF modulus is taken **outside** the average (see README open
-question 1).
+### Step 2 (new files; Step-1 modules untouched)
+
+| file | contents |
+|---|---|
+| `af_estimation.py` | results docs' Step 2(a)–(b): time selection, lag grid, empirical AF, window detection. Places the time origin at received symbol K so the ±(N_avg-1)/2 average never runs into negative symbol indices. `WindowedAF.analytical` evaluates at `t_sel` (not `t_abs`) — required for any candidate `a` other than the true one. |
+| `curve_fit.py` | results docs' Step 3: `|A0|^2_hat = 4 sigma_hat^2/sigma_D^2`, `tau_p0_hat` from the window edge, MSE fit over `N_a = 2^18` candidates (vectorised in chunks). |
+| `../make_figures.py` | every results-doc figure + curve-fit cost surface → `../figures/`, numbers in `figures_log.txt` |
+| `../mc_curvefit.py` | Monte-Carlo tables (ours next to the docs') → `../results/mc_curvefit.csv/.md`; incremental, `--resume` |
+
+Outcome: the documents are reproduced — figures match, and the curve-fit
+Doppler NMSE is 0.3–4 (docs 0.5–4.9) vs CB-SFS 1e-2–1e-5; noiseless 31-Jan
+NMSE 4.24 (docs 4.91) with 107/128 estimates on a grid boundary. The
+README's *Step 2 results* section has the table and the three mechanisms
+(flat monotone cost → boundary; window-edge `tau_p0` ties the fit to
+`a_sr`, making the cost jump there; `|A0|^2_hat` biased by
+`4 P_n/sigma_D^2`). The figures also showed that the AF modulus is taken
+**outside** the average (README open question 1).
+
+Missing (see README *What is missing, and why*): Monte-Carlo for Setting 5
+(`N_is = 64`; runs kept getting killed by the low-memory reaper before a
+single ~25-min S5 case finished — resume with `--resume --cases 22jan
+--settings 5`), and the docs' 4096-trial bias run (Yogev chose to skip it;
+the 128-trial biases are in `results/mc_curvefit.md`). Yogev is writing an
+interim summary from the committed state.
+
+Practical note: long background Monte-Carlo runs launched from Claude Code
+have been killed repeatedly by the idle-session low-memory reaper (not by
+the script, ~300 MB/process). Use `--resume`, or run them in the user's own
+terminal.
 
 `study_cbsfs_accuracy.py` is the sweep script that produced the numeric
 tables in the README (record length `M`, segment length `N_seg`, harmonic

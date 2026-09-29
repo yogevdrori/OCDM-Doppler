@@ -1,0 +1,17 @@
+make_figures.py  seed=0  a_sr=cbsfs  figures=31jan 22jan dense cost cbsfs  (one realisation per figure; CB-SFS N_c=24000, N_seg=2048, harmonic 1)
+  31-Jan: t_sel=2.499e-06s  max|emp-ana|/peak=0.640%  a_hat_mag=+9.9999e-04 (true +5.0e-04)  |A0|^2_hat=1.2941 (true 1.2960)
+  22-Jan S1 10 dB: a_sr=+4.6966e-04 (true +5.0e-04)  t_sel=1.665e-06s  window=[-2.772e-06, 1.047e-06]s  a_hat_mag=+9.9999e-04  |A0|^2_hat=1.7389 (true 1.2960)  tau_p0_hat=6.1809e-07 (true 5.0e-07)
+  22-Jan S1 20 dB: a_sr=+4.5932e-04 (true +5.0e-04)  t_sel=1.665e-06s  window=[-2.772e-06, 1.047e-06]s  a_hat_mag=+4.5931e-04  |A0|^2_hat=1.3394 (true 1.2960)  tau_p0_hat=6.1808e-07 (true 5.0e-07)
+  22-Jan S2 10 dB: a_sr=+4.6607e-04 (true +5.0e-04)  t_sel=1.665e-06s  window=[-2.772e-06, 1.047e-06]s  a_hat_mag=+9.9999e-04  |A0|^2_hat=1.7499 (true 1.2960)  tau_p0_hat=6.1809e-07 (true 5.0e-07)
+  22-Jan S2 20 dB: a_sr=+4.6622e-04 (true +5.0e-04)  t_sel=1.665e-06s  window=[-2.772e-06, 1.047e-06]s  a_hat_mag=+9.9999e-04  |A0|^2_hat=1.3704 (true 1.2960)  tau_p0_hat=6.1809e-07 (true 5.0e-07)
+  22-Jan S3 10 dB: a_sr=+4.9790e-03 (true +5.0e-03)  t_sel=1.65e-06s  window=[-2.797e-06, 1.057e-06]s  a_hat_mag=+5.7099e-03  |A0|^2_hat=1.7694 (true 1.2960)  tau_p0_hat=5.9640e-07 (true 5.0e-07)
+  22-Jan S3 20 dB: a_sr=+4.9790e-03 (true +5.0e-03)  t_sel=1.65e-06s  window=[-2.797e-06, 1.057e-06]s  a_hat_mag=+4.9791e-03  |A0|^2_hat=1.3893 (true 1.2960)  tau_p0_hat=5.9640e-07 (true 5.0e-07)
+  22-Jan S4 10 dB: a_sr=+5.0079e-03 (true +5.0e-03)  t_sel=1.65e-06s  window=[-2.922e-06, 9.324e-07]s  a_hat_mag=+5.0079e-03  |A0|^2_hat=1.7421 (true 1.2960)  tau_p0_hat=7.2136e-07 (true 5.0e-07)
+  22-Jan S4 20 dB: a_sr=+4.9825e-03 (true +5.0e-03)  t_sel=1.65e-06s  window=[-2.797e-06, 1.057e-06]s  a_hat_mag=+4.9825e-03  |A0|^2_hat=1.3789 (true 1.2960)  tau_p0_hat=5.9640e-07 (true 5.0e-07)
+  22-Jan S5 10 dB: a_sr=+5.7738e-04 (true +5.0e-04)  t_sel=6.66e-06s  window=[-9.117e-06, 6.160e-06]s  a_hat_mag=-9.9999e-04  |A0|^2_hat=1.6764 (true 1.2960)  tau_p0_hat=5.0029e-07 (true 5.0e-07)
+  22-Jan S5 20 dB: a_sr=+5.5026e-04 (true +5.0e-04)  t_sel=6.66e-06s  window=[-1.010e-05, 5.174e-06]s  a_hat_mag=-9.9999e-04  |A0|^2_hat=1.3228 (true 1.2960)  tau_p0_hat=1.4864e-06 (true 5.0e-07)
+  22-Jan dense window 20 dB: a_sr=+4.5932e-04 (true +5.0e-04)  t_sel=1.665e-06s  window=[-2.817e-06, 1.165e-06]s  a_hat_mag=-9.9999e-04  |A0|^2_hat=1.3394 (true 1.2960)  tau_p0_hat=4.9998e-07 (true 5.0e-07)
+  cost [31-Jan, noiseless ($\hat a_{sr}=a$)]: a_sr=+5.0000e-04  a_hat=+9.9999e-04  |A0|^2=1.2941  tau_p0=5.0000e-07  cost min/true/max=1.186e-06/1.212e-06/1.440e-06
+  cost [22-Jan setting 1, $\sigma_D^2/P_n$ = 20 dB]: a_sr=+4.5932e-04  a_hat=+4.5931e-04  |A0|^2=1.3394  tau_p0=6.1808e-07  cost min/true/max=6.616e-05/6.623e-05/6.672e-05
+  cost [22-Jan setting 1, $\sigma_D^2/P_n$ = 10 dB]: a_sr=+4.6966e-04  a_hat=+9.9999e-04  |A0|^2=1.7389  tau_p0=6.1809e-07  cost min/true/max=6.654e-04/6.672e-04/6.771e-04
+  CB-SFS cost: M=1200  N_seg=1024  SNR=10 dB

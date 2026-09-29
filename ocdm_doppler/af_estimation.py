@@ -137,9 +137,23 @@ class WindowedAF:
     def af_win(self) -> np.ndarray:
         return self.af[self.window]
 
-    def analytical(self, a: float, params: SystemParams) -> np.ndarray:
-        """Noiseless |c_Y(t_sel, tau)| on the windowed lags for Doppler a."""
-        return analytical_af.af_magnitude(self.t_abs, self.lags_win, a, params)
+    def analytical(self, a: float, params: SystemParams,
+                   A0_sq: float | None = None,
+                   tau_p0: float | None = None) -> np.ndarray:
+        """Noiseless |c_Y(t_sel, tau)| on the windowed lags for Doppler a.
+
+        Evaluated at the receiver time t_sel (relative to the time origin),
+        as in the documents. Using t_abs instead would be exact only for the
+        true a: the origin shift K T_sym / (1 + a_true) moves (1 + a) t by
+        K T_sym (a - a_true) / (1 + a_true) for any other candidate, which
+        for K ~ N_avg / 2 is a sizeable fraction of a symbol.
+
+        `A0_sq` / `tau_p0` override the true |A_p0|^2 and tau_p0 (e.g. with
+        their estimates); only |A_p0|^2 enters |Pi|.
+        """
+        A = None if A0_sq is None else np.sqrt(A0_sq) + 0j
+        return analytical_af.af_magnitude(self.t_sel, self.lags_win, a, params,
+                                          tau_p0=tau_p0, A_p0=A)
 
 
 def estimate_windowed_af(sig: OCDMSignal, t_origin: float, a_sr: float,
