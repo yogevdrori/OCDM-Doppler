@@ -20,8 +20,8 @@ Sources:
 |---|---|---|
 | 1 | infrastructure: signal model, analytical AF, CB-SFS | done |
 | 2 | Section-4 curve-fitting estimator + reproduction of the documents' figures and tables | done (see *Step 2 results*) |
-| 3 | early-late discriminator S-curve (proof of concept for the loop) | next |
-| 4 | present reproduction + loop proposal to Ron | |
+| 3 | early-late discriminator S-curve (proof of concept for the loop) | done (see *Step 3 results*) |
+| 4 | present reproduction + loop proposal to Ron | next |
 | 5 | closed-loop detector | |
 
 ## Layout
@@ -36,15 +36,17 @@ Package `ocdm_doppler/` (NumPy only):
 | `cbsfs.py` | segmented CAF (27), autocorrelated CAF (28), cost function (29), peak location, Doppler estimate (33)–(34) |
 | `af_estimation.py` | documents' Step 2(a)–(b): time selection (Eqn. 1), lag grid, empirical AF, window detection |
 | `curve_fit.py` | documents' Step 3: `|A0|^2` and `tau_p0` estimates, MSE curve fit over `N_a` candidate Doppler values |
+| `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late`, `s_curve`; `e > 0` means `a_hat` too small |
 
 Scripts (run from this directory; need `matplotlib` for the figures):
 
 | script | output |
 |---|---|
-| `verify_infrastructure.py` | 9 sanity checks (9/9 passing) |
+| `verify_infrastructure.py` | 10 sanity checks (10/10 passing; check 6 = discriminator zero and sign) |
 | `make_figures.py` | `figures/*.png` + `figures/figures_log.txt` — every figure of the documents, the curve-fitting cost surface, a [CBSFS] Fig. 5-style plot (~9 min; `--a-sr genie` skips CB-SFS) |
 | `mc_curvefit.py` | `results/mc_curvefit.csv` / `.md` — Monte-Carlo NMSE and bias tables of the documents, ours next to theirs; incremental, `--resume` after an interruption |
 | `mc_cbsfs_22jan.py` | Monte-Carlo NMSE of CB-SFS alone |
+| `study_scurve.py` | Step 3: discriminator S-curves, metrics and the tau-domain contrast → `results/scurve.csv` / `.md` / `_log.txt`, raw costs in `results/scurve_raw/`, `figures/fig_scurve_*.png`; `--quick`, `--resume`, `--max-new` (~27 min compute, 4 processes) |
 | `study_cbsfs_accuracy.py` | CB-SFS sweeps over `M`, `N_seg`, harmonic index (tables below) |
 
 ## Design decisions worth knowing
@@ -181,8 +183,108 @@ in `figures/figures_log.txt` (`a_hat_mag` at `a_min` at both SNRs; at
 Doppler NMSE 9 and `tau_p0` NMSE 7.8 at 20 dB (documents: 8.48, 19.9) —
 consistent with the documents but far too few trials to report.
 
-Not started yet (by plan): Steps 3–5 (early-late S-curve, proposal to Ron,
-closed-loop detector).
+Not started yet (by plan): Steps 4–5 (proposal to Ron, closed-loop
+detector).
+
+## Step 3 results: the early-late discriminator (proof of concept)
+
+**Question.** Does a discriminator in the cycle-frequency domain have what a
+tracking loop needs — a zero crossing at the true Doppler, a linear region
+with a usable slope, a wide pull-in range, a measurable noise level — where
+the curve-fitting cost (Step 2) has none of these? This is evidence for the
+*loop proposal*, not a claim that a loop is more accurate than CB-SFS.
+
+**Discriminator** (`ocdm_doppler/discriminator.py`). Predict the harmonic at
+`alpha_p = (1 + a_hat) / N_sym` (k = 1), evaluate the CB-SFS cost (29) at
+`alpha_p ± delta`, and output `e = (C+ − C−) / (C+ + C−)`. `e > 0` means
+`a_hat` is too small, so the loop update is `a_hat += mu e`. Two cost
+evaluations per update, versus a grid of 128–512 for CB-SFS.
+
+**Setup** (`study_scurve.py`): 22-Jan preset, N_c = 24000, N_seg = 2048,
+harmonic 1; `a_hat − a` over ±3e-2 (dense ±2e-3); `delta` ∈ {0.25, 0.5,
+0.75}/N_seg. N_mc = 64 for a = 5e-4 (the main results). The a = 5e-3 runs
+use N_mc = 16 and **only check that the S-curve depends on the offset
+alone**, not on a. The mean S-curves coincide (`figures/fig_scurve_snr.png`,
+right): same K_d (175 vs 174), same pull-in, same stable points. σ_e/K_d
+comes out 12–25 % lower at a = 5e-3; with 16 trials a standard deviation is
+itself uncertain by ≈ 18 %, so this is at the edge of what the check
+resolves (the ratio to CB-SFS on the same data is ≈ 1.0 at both a).
+Full tables: `results/scurve.md`.
+
+![main figure](figures/fig_scurve_vs_curvefit.png)
+
+**Choice of delta.** Fixed before the run: the smallest σ_e/K_d at a = 5e-4,
+20 dB, among the deltas whose pull-in range covers `[a_min − a, a_max − a]`.
+All three qualify; **δ = 0.25/N_seg** has the best accuracy. Larger δ gives
+a steeper slope and a wider pull-in, but the probe points sit lower on the
+main lobe where the cost is smaller and relatively noisier, so the noise
+grows faster than the slope (`figures/fig_scurve_delta.png`):
+
+| δ·N_seg (a = 5e-4, 20 dB) | K_d | pull-in (≥ 90 % correct sign) | σ_e/K_d |
+|---|---|---|---|
+| 0.25 | 174 | ±9.9e-3 | **2.7e-5** |
+| 0.5 | 369 | ±1.3e-2 | 3.7e-5 |
+| 0.75 | 584 | ±1.5e-2 | 1.0e-4 |
+
+**Characteristics at δ = 0.25/N_seg, a = 5e-4, N_mc = 64:**
+
+| SNR | bias (zero crossing) | K_d | linear (R², ±2e-3) | pull-in | σ_e at 0 | **σ_e / K_d** | CB-SFS RMSE, same data | CB-SFS RMSE, Step 2 (128 trials) |
+|---|---|---|---|---|---|---|---|---|
+| noiseless | +2.6e-6 | 174 | 1.0000 | ±9.9e-3 | 4.4e-3 | **2.5e-5** | 2.4e-5 | – |
+| 20 dB | +1.9e-6 | 174 | 1.0000 | ±9.9e-3 | 4.8e-3 | **2.7e-5** | 2.6e-5 | 2.7e-5 |
+| 10 dB | +1.5e-6 | 174 | 1.0000 | ±9.9e-3 | 7.9e-3 | **4.6e-5** | 4.3e-5 | 4.5e-5 |
+
+- **Zero crossing at the true Doppler.** The bias (≤ 2.6e-6, < 0.6 % of a) is
+  below its own standard error σ_e/(K_d √64) ≈ 3–6e-6: no measurable bias.
+- **Linear with a constant slope.** K_d = 174 at every SNR (175 at
+  a = 5e-3); the mean S-curve is linear to R² = 1.0000 over ±2e-3, i.e. the
+  whole `a_min..a_max` scale.
+- **Wide pull-in.** ±9.9e-3 (grid step 7.6e-4 there), i.e. 10× the prior
+  range `|a| < 1e-3`, as
+  predicted by the main-lobe nulls at ±1/N_seg in α ⇒ ±N_sym/N_seg = ±9.8e-3
+  in a.
+- **The implied single-block error σ_e/K_d equals the CB-SFS RMSE** on the
+  same data (ratio 1.01–1.06) and the Step-2 CB-SFS RMSE — same order, as
+  expected: both read the same peak of the same cost function. The noise
+  floor at high SNR (noiseless σ_e ≈ 20 dB σ_e) is the self-noise of the
+  cyclostationary estimate from a finite record with random data, not
+  channel noise.
+
+**False locks.** Beyond the pull-in range the S-curve follows the Dirichlet
+sidelobes of the cost function, and a loop (which climbs `C`) can settle on
+a sidelobe peak. The mean S-curve has stable zero crossings at
+**±1.41e-2 and ±2.41e-2** (every SNR), matching the sidelobe peaks at
+±1.5/N_seg and ±2.5/N_seg in α (±1.46e-2, ±2.44e-2 in a). With the prior
+`|a| < 1e-3` (22-Jan S1/S2) any initialisation in `[a_min, a_max]` is well
+inside the pull-in range. For `a_max = 1e-2` (S3/S4) the prior range is as
+wide as the pull-in range, so the loop should be initialised from a CB-SFS
+acquisition (or acquire with a smaller N_seg: the pull-in scales as
+`N_sym / N_seg`).
+
+**Contrast with the τ domain** (same 64 realisations, a = 5e-4, 20 dB;
+`figures/fig_scurve_tau.png`). The curve-fitting cost J(a) (Step 2, N_a =
+2^12) has its global minimum at `a_max` in 45, at the `a_sr` window-edge
+jump in 14, at `a_min` in 1 and in the interior in 4 of 64 realisations.
+Its gradient discriminator `e_tau = −dJ/da` is positive almost everywhere
+(J decreases towards `a_max`): only 4 of 64 realisations have any zero
+crossing (a local minimum of J) away from the ends and the jump, and only
+**1 of 64** has one within 1e-4 of the true a. A gradient-following loop on
+the AF-magnitude fit would drift to `a_max`. RMSE of `argmin J`: 4.9e-4,
+versus 2.6e-5 for the CB-SFS `a_sr` it starts from.
+
+**What this does *not* show.** No steady-state accuracy advantage over
+CB-SFS: on the same block, one discriminator update is exactly as accurate
+as the CB-SFS grid search (σ_e/K_d ≈ CB-SFS RMSE), and averaging a loop over
+L blocks is equivalent to CB-SFS on an L-times longer record. The loop's
+advantages are elsewhere: **tracking a time-varying Doppler** (CB-SFS would
+be re-run from scratch on every block) and **cost per update** — 2 cost
+evaluations instead of a 128–512-point grid.
+
+**What a loop simulation would add (Step 5, after Ron's feedback, not done
+here):** iterate `a_hat_{n+1} = a_hat_n + mu e_n` over consecutive blocks
+and measure the convergence time and steady-state jitter versus `mu` (loop
+noise bandwidth), the tracking lag for a Doppler ramp, and the
+false-lock / cycle-slip probability versus the initial error.
 
 ## Step 1 findings (CB-SFS)
 

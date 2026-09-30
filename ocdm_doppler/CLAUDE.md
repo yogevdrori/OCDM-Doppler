@@ -69,17 +69,17 @@ rather than just re-reading the papers:
 2. **Step 2 (done)** — implement the Section-4 curve-fitting estimator on
    top of Step 1 and reproduce Zikun's key numbers: noiseless NMSE ~4.9,
    and the noisy case where CB-SFS strongly outperforms curve-fitting.
-3. **Step 3 (next; optional, strengthens the proposal)** — build an
-   early-late discriminator S-curve as a proof-of-concept for the loop
-   approach.
-4. **Step 4** — present the reproduction + loop proposal to Ron.
+3. **Step 3 (done)** — build an early-late discriminator S-curve as a
+   proof-of-concept for the loop approach.
+4. **Step 4 (next)** — present the reproduction + loop proposal to Ron.
 5. **Step 5** — full closed-loop detector development (the actual project
    deliverable).
 
-## Status: Steps 1 and 2 complete (Step 1 details below)
+## Status: Steps 1, 2 and 3 complete (Step 1 details below)
 
 Package `ocdm_doppler/` (this directory), pure NumPy, no third-party deps
-beyond `numpy`. 9/9 sanity checks pass (`python verify_infrastructure.py`).
+beyond `numpy`. 10/10 sanity checks pass (`python verify_infrastructure.py`;
+check 6 is the discriminator).
 
 | module | contents |
 |---|---|
@@ -121,10 +121,36 @@ single ~25-min S5 case finished — resume with `--resume --cases 22jan
 the 128-trial biases are in `results/mc_curvefit.md`). Yogev is writing an
 interim summary from the committed state.
 
-Practical note: long background Monte-Carlo runs launched from Claude Code
-have been killed repeatedly by the idle-session low-memory reaper (not by
-the script, ~300 MB/process). Use `--resume`, or run them in the user's own
-terminal.
+### Step 3 (new files only; nothing in Steps 1–2 modified)
+
+| file | contents |
+|---|---|
+| `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late` (vectorised over `a_hat`, one `cost_function` call), `s_curve`, `error_from_costs`. **Sign: `e > 0` ⇒ `a_hat` too small; loop update `a_hat += mu e`.** Default `delta = 0.5/N_seg`; the study found `0.25/N_seg` best (lowest σ_e/K_d). |
+| `../study_scurve.py` | S-curves (a = 5e-4 N_mc 64, a = 5e-3 N_mc 16 as an offset-only check; noiseless/20/10 dB; δ ∈ {0.25, 0.5, 0.75}/N_seg), metrics, τ-domain contrast, 4 figures `fig_scurve_*.png`, `results/scurve.*`, raw costs `results/scurve_raw/*.npz` (reuse with `--resume`). All alphas of one realisation lie on one grid (h = 1/(64 N_seg)), so it is one `cost_function` call per realisation. |
+| `../verify_infrastructure.py` | new check 6 (checks 1–5 untouched) |
+
+Outcome (δ = 0.25/N_seg, a = 5e-4): zero crossing at the truth (bias
+≤ 2.6e-6, below its standard error), K_d = 174 at every SNR, linear over
+a_min..a_max, pull-in ±9.9e-3 (= main-lobe nulls, ±N_sym/N_seg), σ_e/K_d =
+2.5e-5 / 2.7e-5 / 4.6e-5 (noiseless / 20 / 10 dB) ≈ CB-SFS RMSE on the same
+data — i.e. no steady-state gain over CB-SFS (by design; the loop's case is
+tracking + 2 evaluations per update). False-lock points at ±1.41e-2 and
+±2.41e-2 (sidelobe peaks ±1.5/N_seg, ±2.5/N_seg): harmless for
+|a| < 1e-3, relevant for a_max = 1e-2 (initialise from CB-SFS). τ domain:
+the curve-fit cost has a minimum near the truth in 1 of 64 realisations.
+Not done by design: a loop simulation over blocks (Step 5).
+
+Practical notes:
+- Long background Monte-Carlo runs launched from Claude Code have been
+  killed repeatedly by the idle-session low-memory reaper (not by the
+  scripts, ~300 MB/process); PyCharm alone used ~4.7 GB of the 15.7 GB.
+  Use `--resume`, run in chunks in the foreground (`study_scurve.py
+  --max-new`), or run in the user's own terminal.
+- `cbsfs.cost_function` throughput is memory-bandwidth-bound: ~9 s per
+  realisation for 437 alphas × 24000 samples × 16 lags; 4 processes give
+  little more than 2.
+- Windows PowerShell 5.1 mangles double quotes inside `git commit -m`
+  here-strings; commit with `-F <message file>`.
 
 `study_cbsfs_accuracy.py` is the sweep script that produced the numeric
 tables in the README (record length `M`, segment length `N_seg`, harmonic

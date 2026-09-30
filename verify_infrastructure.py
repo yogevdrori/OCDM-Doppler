@@ -157,6 +157,27 @@ for a_test in (0.0, 5e-4):
 # ---------------------------------------------------------------------------
 print()
 print("=" * 72)
+print("6. Early-late discriminator: zero at the truth, correct sign around it")
+print("=" * 72)
+
+from ocdm_doppler import discriminator
+
+p6 = SystemParams(N_is=16, modulation="bpsk", a_max=1e-3, a_true=5e-4,
+                  snr_db=float("inf"), rho=32, N_seg=2048)
+M6 = 24000 // p6.N_sym
+sig6 = OCDMSignal(p6, n_symbols=M6 + 2, seed=1000)
+y6 = sig6.rx_nominal(M6 * p6.N_sym, noiseless=True)
+offs = np.array([-3e-4, 0.0, 3e-4])
+e6 = discriminator.s_curve(y6, p6.a_true_eff, offs, p6, N_seg=2048,
+                           delta=0.25 / 2048)
+# linear-region slope K_d ~ 174 (study_scurve.py): e(-3e-4) ~ +0.05
+check("discriminator: e(a_hat = a) ~ 0, e > 0 below and e < 0 above",
+      abs(e6[1]) < 0.1 * abs(e6[0]) and e6[0] > 0 and e6[2] < 0,
+      f"e(-3e-4, 0, +3e-4) = {np.array2string(e6, precision=4)}")
+
+# ---------------------------------------------------------------------------
+print()
+print("=" * 72)
 n_pass = sum(1 for _, ok in results if ok)
 print(f"SUMMARY: {n_pass}/{len(results)} checks passed")
 print("=" * 72)
