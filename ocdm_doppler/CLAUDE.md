@@ -125,8 +125,8 @@ interim summary from the committed state.
 
 | file | contents |
 |---|---|
-| `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late` (vectorised over `a_hat`, one `cost_function` call), `s_curve`, `error_from_costs`. **Sign: `e > 0` ⇒ `a_hat` too small; loop update `a_hat += mu e`.** Default `delta = 0.5/N_seg`; the study found `0.25/N_seg` best (lowest σ_e/K_d). |
-| `../study_scurve.py` | S-curves (a = 5e-4 N_mc 64, a = 5e-3 N_mc 16 as an offset-only check; noiseless/20/10 dB; δ ∈ {0.25, 0.5, 0.75}/N_seg), metrics, τ-domain contrast, 4 figures `fig_scurve_*.png`, `results/scurve.*`, raw costs `results/scurve_raw/*.npz` (reuse with `--resume`). All alphas of one realisation lie on one grid (h = 1/(64 N_seg)), so it is one `cost_function` call per realisation. |
+| `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late` (vectorised over `a_hat`, one `cost_function` call), `s_curve`, `error_from_costs`. **Sign: `e > 0` ⇒ `a_hat` too small; loop update `a_hat += mu e`.** Default `delta = 0.25/N_seg`, the value selected by the study (lowest σ_e/K_d while covering the prior range). |
+| `../study_scurve.py` | S-curves (a = 5e-4 N_mc 64, a = 5e-3 N_mc 16 as an offset-only check; noiseless/20/10 dB; δ ∈ {0.25, 0.5, 0.75}/N_seg), metrics, τ-domain contrast, 4 figures `fig_scurve_*.png`, `results/scurve.*`, raw costs `results/scurve_raw/*.npz` (reuse with `--resume`; `--replot` redraws tables and figures from them without any computation). All alphas of one realisation lie on one grid (h = 1/(64 N_seg)), so it is one `cost_function` call per realisation. |
 | `../verify_infrastructure.py` | new check 6 (checks 1–5 untouched) |
 
 Outcome (δ = 0.25/N_seg, a = 5e-4): zero crossing at the truth (bias

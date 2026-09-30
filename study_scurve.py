@@ -34,6 +34,7 @@ Usage (from this directory):
                                        # ~10-15 s per realisation-process)
     python study_scurve.py --resume --max-new 2   # in chunks of 2 conditions
     python study_scurve.py --resume    # continue / only redo the analysis
+    python study_scurve.py --replot    # tables + figures from the raw data only
 """
 
 from __future__ import annotations
@@ -267,11 +268,17 @@ def main():
                     help="trials per condition at a = 5e-3 (only checks "
                          "that the S-curve depends on the offset alone)")
     ap.add_argument("--procs", type=int, default=4)
+    ap.add_argument("--replot", action="store_true",
+                    help="only redo the analysis, tables and figures from "
+                         "results/scurve_raw/; never computes (exits if a "
+                         "condition is missing)")
     ap.add_argument("--max-new", type=int, default=None,
                     help="compute at most this many new conditions, then "
                          "exit (use with --resume to split the run into "
                          "shorter foreground calls)")
     args = ap.parse_args()
+    if args.replot:
+        args.resume, args.max_new = True, 0
 
     n_mc = 3 if args.quick else args.n_mc
     n_mc_for = {1e-3: n_mc, 1e-2: 3 if args.quick else args.n_mc_check}
@@ -346,15 +353,16 @@ def main():
                 f"[{time.time() - ts:.0f}s]")
 
     # ---------------- consistency check of the grid lookup ------------------
-    p0 = params_for(1e-3, 20.0)
-    _, _, y0 = _signal(p0, seeds[0])
-    jj = np.array([-13, -2, 0, 3, 13, -200, 200])
-    direct = disc.s_curve(y0, p0.a_true_eff, offset_of(jj, p0), p0,
-                          delta=0.5 / N_SEG, N_seg=N_SEG)
-    E_look = e_matrix(costs[(1e-3, 20.0)][:1], DELTA_M[0.5])[0]
-    look = E_look[[int(np.flatnonzero(OFF_J == j)[0]) for j in jj]]
-    log(f"  grid lookup vs discriminator.early_late: max |diff| = "
-        f"{np.max(np.abs(direct - look)):.2e}")
+    if not args.replot:
+        p0 = params_for(1e-3, 20.0)
+        _, _, y0 = _signal(p0, seeds[0])
+        jj = np.array([-13, -2, 0, 3, 13, -200, 200])
+        direct = disc.s_curve(y0, p0.a_true_eff, offset_of(jj, p0), p0,
+                              delta=0.5 / N_SEG, N_seg=N_SEG)
+        E_look = e_matrix(costs[(1e-3, 20.0)][:1], DELTA_M[0.5])[0]
+        look = E_look[[int(np.flatnonzero(OFF_J == j)[0]) for j in jj]]
+        log(f"  grid lookup vs discriminator.early_late: max |diff| = "
+            f"{np.max(np.abs(direct - look)):.2e}")
 
     # ---------------- (b) metrics ------------------------------------------
     results = {}
@@ -511,65 +519,80 @@ def main():
     r_main = results[(1e-3, 20.0, d_main)]
     dense = np.abs(r_main["off"]) <= 2.0e-3 + 1e-12
 
-    # main figure
-    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.3),
-                             gridspec_kw=dict(width_ratios=[1, 1, 1.15]))
-    ax = axes[0]
+    # main figure (for the email: must stay readable scaled to ~1000 px wide,
+    # hence the larger fonts and the uncluttered left panel)
     off_tau = (a_grid - p1.a_true_eff) * sc
-    for j in J:
-        ax.plot(off_tau, (j - j.min()) / (np.ptp(j) or 1), color="0.6",
-                lw=0.5, alpha=0.5)
     jn = np.array([(j - j.min()) / (np.ptp(j) or 1) for j in J])
-    ax.plot(off_tau, jn.mean(0), color="black", lw=1.6, label="mean")
-    ax.axvline(0, color="0.3", lw=0.7, ls=":")
-    ax.set_xlim(off_tau[0], off_tau[-1])
-    ax.set_xlabel(r"$a - a_{true}$  ($\times 10^{-3}$)")
-    ax.set_ylabel("normalised cost  (J − min) / range")
-    ax.set_title("τ domain: curve-fitting cost J(a)\n"
-                 f"no minimum at the true a ({n_mc} realisations, 20 dB)",
-                 fontsize=10)
-    ax.grid(True, color="0.9", lw=0.5)
-    ax.legend(loc="upper right", fontsize=8)
+    # one representative realisation per class of the global minimum of J
+    reps = []
+    for cls in ("a_max", "a_sr", "a_min", "interior"):
+        idx = [i for i, r in enumerate(tau_rows) if r["where"] == cls]
+        if idx:
+            reps.append(idx[0])
 
-    ax = axes[1]
-    band(ax, r_main, COL_SNR[20.0], f"mean ± 1 std", sel=dense)
-    deco(ax)
-    ax.set_xlim(off_tau[0], off_tau[-1])
-    ax.set_ylabel("discriminator output e")
-    ax.text(0.03, 0.04,
-            f"slope $K_d$ = {r_main['K_d']:.0f}\n"
-            f"$\\sigma_e$ at 0 = {r_main['sig_e']:.1e} (band too narrow "
-            f"to see)\n"
-            f"$\\sigma_e/K_d$ = {r_main['sig_over_K']:.1e}  "
-            f"(CB-SFS RMSE: {r_main['cb_rmse']:.1e})",
-            transform=ax.transAxes, fontsize=8, va="bottom",
-            bbox=dict(boxstyle="round", fc="white", ec="0.8"))
-    ax.set_title("α domain: early-late S-curve, same axis\n"
-                 f"zero crossing at the true a (δ = {d_main}/N_seg, 20 dB)",
-                 fontsize=10)
-    ax.legend(loc="upper right", fontsize=8)
+    with plt.rc_context({"font.size": 12}):
+        fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.9),
+                                 gridspec_kw=dict(width_ratios=[1, 1, 1.15]))
+        ax = axes[0]
+        for n, i in enumerate(reps):
+            ax.plot(off_tau, jn[i], color="0.7", lw=1.0,
+                    label="single realisations" if n == 0 else None)
+        ax.plot(off_tau, jn.mean(0), color="black", lw=2.2,
+                label=f"mean of {n_mc}")
+        ax.axvline(0, color="0.3", lw=0.8, ls=":")
+        ax.set_xlim(off_tau[0], off_tau[-1])
+        ax.set_ylim(-0.03, 1.03)
+        ax.set_xlabel(r"$a - a_{true}$  ($\times 10^{-3}$)")
+        ax.set_ylabel("normalised cost J")
+        ax.set_title("τ domain: curve-fitting cost J(a)", fontsize=12.5)
+        ax.grid(True, color="0.9", lw=0.5)
+        ax.legend(loc="upper right", fontsize=10)
+        ax.text(0.03, 0.04,
+                f"global min at $a_{{max}}$: {counts['a_max']}/{n_mc}\n"
+                f"at $\\hat a_{{sr}}$ jump: {counts['a_sr']}/{n_mc}\n"
+                f"local min near true $a$: {n_near}/{n_mc}",
+                transform=ax.transAxes, fontsize=10.5, va="bottom",
+                bbox=dict(boxstyle="round", fc="white", ec="0.7"))
 
-    ax = axes[2]
-    for snr in SNRS:
-        band(ax, results[(1e-3, snr, d_main)], COL_SNR[snr], LBL_SNR[snr])
-    ax.axvspan(r_main["lo90"] * sc, r_main["hi90"] * sc, color="0.85",
-               zorder=0, label="pull-in (90 %, 20 dB)")
-    ax.axvspan(need_lo * sc, need_hi * sc, color="#c7e9c0", zorder=0,
-               label=r"$[a_{min}-a,\ a_{max}-a]$")
-    xs = [x for x in stable_crossings(r_main["off"], r_main["e_mean"])
-          if abs(x) > 1e-3]
-    ax.plot(np.array(xs) * sc, np.zeros(len(xs)), "v", color="#d62728",
-            ms=7, label="false-lock points (20 dB)")
-    deco(ax)
-    ax.set_title("α domain: full S-curve and pull-in range", fontsize=10)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=3,
-              fontsize=7.5, frameon=False)
-    fig.suptitle("Why a closed loop: the α-domain discriminator has a zero "
-                 "crossing, slope and pull-in range at the true Doppler; the "
-                 "τ-domain fit does not", fontsize=10.5)
-    fig.tight_layout()
-    fig.savefig(fig_dir / "fig_scurve_vs_curvefit.png", dpi=150)
-    plt.close(fig)
+        ax = axes[1]
+        band(ax, r_main, COL_SNR[20.0], "mean ± 1 std", sel=dense)
+        deco(ax)
+        ax.set_xlim(off_tau[0], off_tau[-1])
+        ax.set_ylabel("discriminator output e")
+        ax.text(0.03, 0.04,
+                f"slope $K_d$ = {r_main['K_d']:.0f}\n"
+                f"$\\sigma_e$ = {r_main['sig_e']:.1e} (band too thin to see)\n"
+                f"$\\sigma_e/K_d$ = {r_main['sig_over_K']:.1e}\n"
+                f"(CB-SFS RMSE {r_main['cb_rmse']:.1e})",
+                transform=ax.transAxes, fontsize=10.5, va="bottom",
+                bbox=dict(boxstyle="round", fc="white", ec="0.7"))
+        ax.set_title(f"α domain: S-curve (δ = {d_main}/N_seg)",
+                     fontsize=12.5)
+        ax.legend(loc="upper right", fontsize=10)
+
+        ax = axes[2]
+        for snr in SNRS:
+            band(ax, results[(1e-3, snr, d_main)], COL_SNR[snr],
+                 LBL_SNR[snr])
+        ax.axvspan(r_main["lo90"] * sc, r_main["hi90"] * sc, color="0.85",
+                   zorder=0, label="pull-in (20 dB)")
+        ax.axvspan(need_lo * sc, need_hi * sc, color="#c7e9c0", zorder=0,
+                   label=r"$[a_{min}-a,\ a_{max}-a]$")
+        xs = [x for x in stable_crossings(r_main["off"], r_main["e_mean"])
+              if abs(x) > 1e-3]
+        ax.plot(np.array(xs) * sc, np.zeros(len(xs)), "v", color="#d62728",
+                ms=8, label="false-lock points")
+        deco(ax)
+        ax.set_title("α domain: pull-in range", fontsize=12.5)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.19), ncol=3,
+                  fontsize=9.5, frameon=False, columnspacing=1.0,
+                  handletextpad=0.5)
+        fig.suptitle("Doppler discriminator: α domain (CB-SFS cost) vs "
+                     "τ domain (AF curve fit), a = 5e-4, 20 dB",
+                     fontsize=13.5)
+        fig.tight_layout()
+        fig.savefig(fig_dir / "fig_scurve_vs_curvefit.png", dpi=150)
+        plt.close(fig)
 
     # delta comparison
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))

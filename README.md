@@ -36,7 +36,7 @@ Package `ocdm_doppler/` (NumPy only):
 | `cbsfs.py` | segmented CAF (27), autocorrelated CAF (28), cost function (29), peak location, Doppler estimate (33)–(34) |
 | `af_estimation.py` | documents' Step 2(a)–(b): time selection (Eqn. 1), lag grid, empirical AF, window detection |
 | `curve_fit.py` | documents' Step 3: `|A0|^2` and `tau_p0` estimates, MSE curve fit over `N_a` candidate Doppler values |
-| `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late`, `s_curve`; `e > 0` means `a_hat` too small |
+| `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late`, `s_curve`; `e > 0` means `a_hat` too small; default `delta = 0.25/N_seg` (selected in Step 3) |
 
 Scripts (run from this directory; need `matplotlib` for the figures):
 
@@ -46,7 +46,7 @@ Scripts (run from this directory; need `matplotlib` for the figures):
 | `make_figures.py` | `figures/*.png` + `figures/figures_log.txt` — every figure of the documents, the curve-fitting cost surface, a [CBSFS] Fig. 5-style plot (~9 min; `--a-sr genie` skips CB-SFS) |
 | `mc_curvefit.py` | `results/mc_curvefit.csv` / `.md` — Monte-Carlo NMSE and bias tables of the documents, ours next to theirs; incremental, `--resume` after an interruption |
 | `mc_cbsfs_22jan.py` | Monte-Carlo NMSE of CB-SFS alone |
-| `study_scurve.py` | Step 3: discriminator S-curves, metrics and the tau-domain contrast → `results/scurve.csv` / `.md` / `_log.txt`, raw costs in `results/scurve_raw/`, `figures/fig_scurve_*.png`; `--quick`, `--resume`, `--max-new` (~27 min compute, 4 processes) |
+| `study_scurve.py` | Step 3: discriminator S-curves, metrics and the tau-domain contrast → `results/scurve.csv` / `.md` / `_log.txt`, raw costs in `results/scurve_raw/`, `figures/fig_scurve_*.png`; `--quick`, `--resume`, `--max-new` (~27 min compute, 4 processes), `--replot` (tables + figures from the raw data only, seconds) |
 | `study_cbsfs_accuracy.py` | CB-SFS sweeps over `M`, `N_seg`, harmonic index (tables below) |
 
 ## Design decisions worth knowing
