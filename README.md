@@ -21,8 +21,8 @@ Sources:
 | 1 | infrastructure: signal model, analytical AF, CB-SFS | done |
 | 2 | Section-4 curve-fitting estimator + reproduction of the documents' figures and tables | done (see *Step 2 results*) |
 | 3 | early-late discriminator S-curve (proof of concept for the loop) | done (see *Step 3 results*) |
-| 4 | present reproduction + loop proposal to Ron | next |
-| 5 | closed-loop detector | |
+| 4 | proposal to Ron; his feedback: detector characteristic vs true a, Δ = {0} vs all lags, SNR working point, first-order loop | done (see *Step 4 results*) |
+| 5 | closed-loop detector: tracking a time-varying Doppler, loop bandwidth trade-off | next (needs a time-varying `a` in `signal_model.py` — to be approved) |
 
 ## Layout
 
@@ -37,6 +37,7 @@ Package `ocdm_doppler/` (NumPy only):
 | `af_estimation.py` | documents' Step 2(a)–(b): time selection (Eqn. 1), lag grid, empirical AF, window detection |
 | `curve_fit.py` | documents' Step 3: `|A0|^2` and `tau_p0` estimates, MSE curve fit over `N_a` candidate Doppler values |
 | `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late`, `s_curve`; `e > 0` means `a_hat` too small; default `delta = 0.25/N_seg` (selected in Step 3) |
+| `loop.py` | first-order loop `a_hat += mu e` on consecutive blocks of one long received signal (`run_loop`; data symbols generated lazily, per-block noise, several SNRs in lockstep); `n95`, `steady_state_var`; constant `a` only |
 
 Scripts (run from this directory; need `matplotlib` for the figures):
 
@@ -47,6 +48,9 @@ Scripts (run from this directory; need `matplotlib` for the figures):
 | `mc_curvefit.py` | `results/mc_curvefit.csv` / `.md` — Monte-Carlo NMSE and bias tables of the documents, ours next to theirs; incremental, `--resume` after an interruption |
 | `mc_cbsfs_22jan.py` | Monte-Carlo NMSE of CB-SFS alone |
 | `study_scurve.py` | Step 3: discriminator S-curves, metrics and the tau-domain contrast → `results/scurve.csv` / `.md` / `_log.txt`, raw costs in `results/scurve_raw/`, `figures/fig_scurve_*.png`; `--quick`, `--resume`, `--max-new` (~27 min compute, 4 processes), `--replot` (tables + figures from the raw data only, seconds) |
+| `study_snr_definitions.py` | Step 4 A: SNR definitions, simulated SER, 10 % working point → `results/snr_definitions.*`, `figures/fig_ser_working_point.png` (~10 s) |
+| `study_characteristic.py` | Step 4 B: open-loop detector characteristic vs true `a`, Δ = {0} vs {0..15} → `results/characteristic.*`, raw `results/char_raw/`, `figures/fig_char_*.png` (~20 min, 4 processes; `--quick`, `--resume`, `--max-new`, `--replot`) |
+| `study_loop.py` | Step 4 C/D: `--part C` convergence times (~2 min); `--part D` closed loop vs SNR → `results/loop_sim.*`, raw `results/loop_raw/`, `figures/fig_loop_*.png` (~70 min, 8 processes; `--quick`, `--resume`, `--max-new`, `--max-real`, `--replot`) |
 | `study_cbsfs_accuracy.py` | CB-SFS sweeps over `M`, `N_seg`, harmonic index (tables below) |
 
 ## Design decisions worth knowing
@@ -285,6 +289,151 @@ here):** iterate `a_hat_{n+1} = a_hat_n + mu e_n` over consecutive blocks
 and measure the convergence time and steady-state jitter versus `mu` (loop
 noise bandwidth), the tracking lag for a Doppler ramp, and the
 false-lock / cycle-slip probability versus the initial error.
+
+## Step 4 results: detector characteristic and first-order loop
+
+Advisor feedback after Step 3 (task file `tasks/step4_detector_and_loop.md`):
+plot the detector characteristic against the **true** a; bias and NMSE vs
+SNR for several Doppler values; compare Δ = {0} with all lags; work at a low
+SNR (≈ 10 % symbol errors); compute and simulate a first-order loop
+(pole 0.99). All runs: 22-Jan preset (BPSK), N_c = 24000, N_seg = 2048,
+k = 1, δ = 0.25/N_seg, seeds 1000 + index.
+
+### A. SNR definitions and the working point (`results/snr_definitions.md`)
+
+| definition | in terms of σ_D²/P_n | offset |
+|---|---|---|
+| per received sample, active part | \|A0\|²/4 · σ_D²/P_n | −4.89 dB |
+| per received sample, average over symbol + GI | \|A0\|²/4 · N_is/N_sym · σ_D²/P_n | −5.86 dB |
+| per data symbol after DFnT, Es/N0 (= Eb/N0 for BPSK) | \|A0\|²/4 · σ_D²/P_n | −4.89 dB |
+
+The hand calculation is confirmed (front-end factor h = A_p0 e^{−j2πf_Tx τ_p0}/2,
+unitary DFnT, E|n|² = P_n). Simulated with a = 0, perfect timing, CFO
+removed, 64 000 symbols per point: SER = 10 % at **σ_D²/P_n = 4.01 dB for
+BPSK** (theory 4.04 dB, Es/N0 = −0.86 dB) and 9.15 dB for QPSK (theory
+9.15 dB). **Working point (WP) used below: σ_D²/P_n = 4.0 dB** (BPSK). The
+SNR grid of B and D runs from −5 to 20 dB plus noiseless, so the mapping to
+another definition (Q2) only shifts the axis by the offsets above.
+
+### B. Open-loop detector characteristic (`results/characteristic.md`)
+
+â = 0 fixed, true a swept (41 points over |a| ≤ 1e-3, 1e-3 steps to ±2e-2),
+64 blocks per (a, SNR), both lag sets on the same blocks.
+`figures/fig_char_detector.png` (mean e/K_d0 vs a with the line y = x),
+`fig_char_bias.png`, `fig_char_kd_vs_snr.png`.
+
+| σ_D²/P_n | K_d/K_d0, {0} | K_d/K_d0, {0..15} | σ_e/K_d, {0} | σ_e/K_d, {0..15} | ratio |
+|---|---|---|---|---|---|
+| ∞ | 1.000 | 1.000 | 1.60e-5 | 2.43e-5 | 1.5 |
+| 20 dB | 1.000 | 1.000 | 1.59e-5 | 2.56e-5 | 1.6 |
+| 10 dB | 1.000 | 1.002 | 2.01e-5 | 4.38e-5 | 2.2 |
+| 5 dB | 1.001 | 1.002 | 3.72e-5 | 1.13e-4 | 3.0 |
+| **4 dB (WP)** | **1.000** | **1.000** | **4.59e-5** | **1.47e-4** | **3.2** |
+| 2.5 dB | 0.999 | 0.995 | 6.68e-5 | 2.31e-4 | 3.5 |
+| 0 dB | 0.994 | 0.957 | 1.47e-4 | 5.84e-4 | 4.0 |
+| −5 dB | **0.549** | **0.127** | 1.92e-3 | 1.48e-2 | 7.7 |
+
+K_d0 = 175.5 for both lag sets (noiseless).
+
+- **Linear and unbiased over the prior range** for both lag sets down to
+  0 dB: R² ≥ 0.993, zero crossing within one standard error of 0, max
+  |bias| 1.9–2.9 standard errors over the 40 points (consistent with
+  noise; the points share data). Pull-in ±1e-2 (main-lobe nulls), as in Step 3.
+- **K_d is constant with SNR down to ≈ 0 dB** (Δ = {0}: −0.6 % at 0 dB;
+  {0..15}: −4 %). At −5 dB the gain drops to 0.55 K_d0 ({0}) and
+  collapses to 0.13 K_d0 ({0..15}, R² = 0.24): below 0 dB a loop designed
+  with K_d0 is slower than designed (and {0..15} essentially stops working).
+- **Δ = {0} is better than {0..15} at every SNR** — same gain, 1.5× lower
+  single-block error noiseless and 3.2× lower at the WP — and costs
+  **20.6 RM/sample** instead of 300 (|Y|² is real; with lag 0 counted as
+  complex the Step-3 convention gives 26.6 and 306).
+- **Unexpected: an offset at a = 0 exactly** (+1.1e-5, 11 σ in a separate
+  check with 256 fresh blocks, both δ = 0.25 and 0.5 /N_seg). It is absent
+  at a = 2.5e-4, 5e-4, 1e-3 (≤ 1.5 σ). At a = 0 the receiver samples
+  synchronously (N_sym = 20 samples per symbol), so the sampled signal is
+  exactly cyclostationary and the guard-interval zeros fall on the same
+  sample positions in every symbol. The mechanism is not yet understood;
+  the table excludes a = 0 from K_d, the zero crossing and max |bias| and
+  reports it separately. The loop runs below avoid a = 0.
+
+### C. Convergence time (`results/loop_convergence.md`, `figures/fig_loop_step.png`)
+
+n95 = ln(0.05)/ln(p) blocks, μ = (1 − p)/K_d(N_c). K_d does not depend on
+the block length (175.4 / 175.5 / 175.3 for N_c = 24000 / 12000 / 6000).
+
+| pole p | n95 (blocks) | N_c = 24000 (6 ms) | N_c = 12000 | N_c = 6000 | simulated n95 (24000 / 12000 / 6000) |
+|---|---|---|---|---|---|
+| 0.9 | 28.4 | 0.17 s | 0.085 s | 0.043 s | 29 / 30 / 23 |
+| 0.95 | 58.4 | 0.35 s | 0.18 s | 0.088 s | 57 / 57 / 52 |
+| 0.99 | 298.1 | **1.79 s** | 0.89 s | 0.45 s | 293 / 288 / 242 |
+
+The noiseless step response follows 1 − pⁿ for N_c = 24000 and 12000.
+For N_c = 6000 (only 1.46 × 2N_seg; the autocorrelated CAF then uses 32 %
+of the samples) the loop settles **3.8 % above** a (bias +1.9e-5 at
+a = 5e-4, p = 0.99), which is why it "converges" early; the same bias is
++1.0 % at N_c = 12000 and +0.3 % at N_c = 24000. N_c = 6000 is too short.
+
+### D. Closed loop vs SNR (`results/loop_sim.md`)
+
+Δ = {0}, pole 0.99 (μ = 0.01/K_d0), â_0 = 0, a ∈ {±1e-4, ±5e-4, ±1e-3},
+9 SNRs; 8 realisations × 2000 steady-state blocks after discarding 1633
+blocks (3 n95 at the slowest SNR, −5 dB, where g_eff = 0.0055). The loop
+output is correlated over ≈ 1/g = 100 blocks: N_eff ≈ 130–220 for the
+variance and 66–111 for the mean per (a, SNR).
+
+At the working point (4 dB):
+
+| a | bias | norm. bias | NMSE | NMSE pred. (var only) | RMSE |
+|---|---|---|---|---|---|
+| −1e-3 | −2.3e-6 ± 0.4e-6 | +0.002 | 1.8e-5 | 1.1e-5 | 4.2e-6 |
+| −5e-4 | −4.2e-6 ± 0.3e-6 | +0.008 | 1.1e-4 | 4.2e-5 | 5.2e-6 |
+| −1e-4 | −1.6e-6 ± 0.4e-6 | +0.016 | 1.4e-3 | 1.1e-3 | 3.7e-6 |
+| +1e-4 | −1.9e-6 ± 0.4e-6 | −0.019 | 1.5e-3 | 1.1e-3 | 3.9e-6 |
+| +5e-4 | +1.0e-6 ± 0.3e-6 | +0.002 | 4.7e-5 | 4.2e-5 | 3.4e-6 |
+| +1e-3 | +1.6e-6 ± 0.6e-6 | +0.002 | 1.4e-5 | 1.1e-5 | 3.8e-6 |
+
+Figures: `fig_loop_nmse_vs_snr.png` (CB-SFS Fig. 7 analogue),
+`fig_loop_bias_vs_snr.png`, `fig_loop_vs_a.png` (mean â vs a against the
+unbiased line, and NMSE vs a: the Rotem–Dabora Fig. 7 / CB-SFS Fig. 6
+analogues; this is also the closed-loop version of the characteristic,
+Q1), `fig_loop_trajectories.png`.
+
+- **The linear prediction holds:** measured variance / predicted
+  (σ_e/K_d)² g/(2 − g) = 0.84–1.35 over all a and SNR, 0.97–1.18 at the WP.
+  At ≥ 10 dB it is 0.95–1.35: the in-loop σ_e is 3–11 % above Part B's,
+  which was measured at a = 0 — the synchronous point above.
+- **Steady-state RMSE ≈ 3.4–5.2e-6 at the WP**, i.e. about 10× below the
+  single-block error σ_e/K_d = 4.6e-5: the loop averages over
+  ≈ (2 − g)/g = 199 blocks (1.2 s of signal). This is integration, not a
+  better estimator: CB-SFS averaged over the same 1.2 s would do the same.
+- **Bias: small but resolved.** |bias| ≤ 4.2e-6 at the WP (≤ 2 % of a for
+  |a| = 1e-4, ≤ 0.8 % for |a| ≥ 5e-4), statistically significant
+  (standard errors 0.3–0.6e-6). It does not follow a simple pattern: at
+  high SNR â mostly overestimates |a|, by 0.1–0.6 % (a = +1e-4: −0.1 %),
+  and towards 0 dB the bias moves negative by 3–8e-6 for five of the six
+  values of a (a = +1e-3: +2e-6).
+  For |a| = 5e-4 at high SNR the bias dominates the NMSE (e.g. a = −5e-4,
+  20 dB: NMSE 2.6e-5 vs 5.1e-6 predicted from the variance).
+- **−5 dB:** NMSE ≈ 1 for |a| = 1e-4 (RMSE ≈ 1e-4 = a) — the loop still
+  tracks but the estimate is no better than the prior; for |a| = 1e-3 the
+  NMSE is 1e-2.
+
+**Δ = {0..15} in the loop (reduced run, D.7:** a ∈ {1e-4, 1e-3}, 20 dB /
+WP / 0 dB, 4 realisations × 1000 blocks, `fig_loop_lagsets.png`). NMSE at
+the WP: 1.0e-2 vs 1.5e-3 (a = 1e-4) and 1.05e-4 vs 1.4e-5 (a = 1e-3) — **7×
+worse than Δ = {0}**, in line with the open-loop variance ratio
+(3.2² ≈ 10; the D.7 variance estimate has only ≈ 60 effective samples).
+At 20 dB ≈ 2×, at 0 dB 10–16×. **Recommendation: Δ = {0}.**
+
+**Not yet done / open:**
+- **Q1, Q2** (advisor): the open-loop characteristic (B) and the
+  closed-loop one (`fig_loop_vs_a.png`) are both available; the SNR mapping
+  is in A.
+- **Tracking a time-varying Doppler** (the case for a loop) needs an
+  integrated Doppler in `signal_model.py` (u(t) = t + ∫a − τ_p0), which the
+  Step-1 constraint does not allow without approval. `loop.run_loop`
+  raises `NotImplementedError` for a non-constant a.
+- The small closed-loop bias (and the a = 0 offset) are not explained yet.
 
 ## Step 1 findings (CB-SFS)
 

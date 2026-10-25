@@ -71,11 +71,15 @@ rather than just re-reading the papers:
    and the noisy case where CB-SFS strongly outperforms curve-fitting.
 3. **Step 3 (done)** — build an early-late discriminator S-curve as a
    proof-of-concept for the loop approach.
-4. **Step 4 (next)** — present the reproduction + loop proposal to Ron.
-5. **Step 5** — full closed-loop detector development (the actual project
-   deliverable).
+4. **Step 4 (done)** — proposal presented; Ron's feedback implemented
+   (task file `../tasks/step4_detector_and_loop.md`): SNR working point,
+   open-loop characteristic vs the true a for Δ = {0} and {0..15}, loop
+   convergence time, closed-loop simulation vs SNR.
+5. **Step 5 (next)** — full closed-loop detector development (the actual
+   project deliverable): tracking a time-varying Doppler, loop bandwidth.
+   Needs a time-varying a in `signal_model.py` — **ask before changing it**.
 
-## Status: Steps 1, 2 and 3 complete (Step 1 details below)
+## Status: Steps 1–4 complete (Step 1 details below)
 
 Package `ocdm_doppler/` (this directory), pure NumPy, no third-party deps
 beyond `numpy`. 10/10 sanity checks pass (`python verify_infrastructure.py`;
@@ -139,6 +143,33 @@ tracking + 2 evaluations per update). False-lock points at ±1.41e-2 and
 |a| < 1e-3, relevant for a_max = 1e-2 (initialise from CB-SFS). τ domain:
 the curve-fit cost has a minimum near the truth in 1 of 64 realisations.
 Not done by design: a loop simulation over blocks (Step 5).
+
+### Step 4 (new files only; Steps 1–3 untouched)
+
+| file | contents |
+|---|---|
+| `loop.py` | first-order loop `run_loop` on consecutive blocks of one long signal (`LongSignal`: lazily generated data symbols; per-block CSCG noise from a seeded stream; several SNRs in lockstep); `n95`, `steady_state_var`. Constant a only: a time-varying a raises `NotImplementedError` (needs an integrated Doppler in `signal_model.py`). |
+| `../study_snr_definitions.py` | Part A: SNR definitions, simulated SER, working point |
+| `../study_characteristic.py` | Part B: open-loop characteristic (â = 0, true a swept), both lag sets on the same blocks; the noisy block = noiseless + √P_n × the same `_BlockNoise` stream OCDMSignal uses (asserted equal) |
+| `../study_loop.py` | Part C (`--part C`) and Part D (`--part D`; `--max-real` splits one case into per-realisation part files) |
+
+Outcome:
+- Working point: BPSK SER = 10 % at σ_D²/P_n = 4.0 dB (simulated 4.01,
+  theory 4.04); Es/N0 = |A0|²/4 · σ_D²/P_n (−4.89 dB).
+- K_d0 = 175.5 for both lag sets; constant down to ≈ 0 dB; at −5 dB 0.55
+  ({0}) and 0.13 ({0..15}). **Δ = {0} is better at every SNR** (σ_e/K_d
+  3.2× lower at the working point, 7× lower closed-loop NMSE) and costs
+  20.6 RM/sample vs 300. Recommend Δ = {0}.
+- n95 = 298 blocks = 1.79 s at p = 0.99, N_c = 24000. K_d independent of
+  N_c, but N_c = 6000 gives a +3.8 % closed-loop bias (too short).
+- Closed loop at the working point: RMSE 3.4–5.2e-6, |bias| ≤ 4.2e-6
+  (≤ 2 % of a); variance matches (σ_e/K_d)² g/(2 − g) to within 0.84–1.35.
+- Unexplained, to investigate: a +1.1e-5 detector offset at a = 0 exactly
+  (synchronous sampling); a small, a- and SNR-dependent closed-loop bias.
+- Runtime: Part B ~20 min (4 processes), Part D ~72 min (8 processes,
+  CPU-bound blocks scale better than Step 3's memory-bound evaluations).
+  The final D.7 case was killed by the memory reaper once and redone in
+  two halves (`--max-real 2`).
 
 Practical notes:
 - Long background Monte-Carlo runs launched from Claude Code have been
