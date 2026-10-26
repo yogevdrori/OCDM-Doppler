@@ -199,7 +199,27 @@ def main():
     ap.add_argument("--max-new", type=int, default=None,
                     help="compute at most this many new values of a, then "
                          "exit (split the run into foreground chunks)")
+    ap.add_argument("--near-zero", action="store_true",
+                    help="print the noiseless bias mean(e)/K_d0 - a at the "
+                         "values of a around 0 from the saved data (shows "
+                         "that only a = 0 is offset), then exit")
     args = ap.parse_args()
+    if args.near_zero:
+        raw = ROOT / "results" / "char_raw"
+        E = np.array([np.load(raw / f"a_{a:+.6f}.npz")["e"] for a in A_GRID])
+        for j, ls in enumerate(LAGSETS):
+            m = E[:, :, 0, j]
+            kd0 = np.polyfit(A_GRID[np.isin(A_GRID, A_DENSE) & (A_GRID != 0)],
+                             m.mean(1)[np.isin(A_GRID, A_DENSE)
+                                       & (A_GRID != 0)], 1)[0]
+            print(f"lag set {{{ls}}}, noiseless, K_d0 = {kd0:.1f}: "
+                  "mean(e)/K_d0 - a  [std err]")
+            for a in (-2e-4, -1e-4, -5e-5, 0.0, 5e-5, 1e-4, 2e-4, 5e-4,
+                      1e-3):
+                i = int(np.flatnonzero(np.isclose(A_GRID, a))[0])
+                print(f"   a = {a:+.1e}: {m[i].mean() / kd0 - a:+.2e}  "
+                      f"[{m[i].std() / kd0 / np.sqrt(m.shape[1]):.1e}]")
+        return
     if args.replot:
         args.resume = True
 

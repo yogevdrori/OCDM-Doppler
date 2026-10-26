@@ -166,10 +166,24 @@ Outcome:
   (≤ 2 % of a); variance matches (σ_e/K_d)² g/(2 − g) to within 0.84–1.35.
 - Unexplained, to investigate: a +1.1e-5 detector offset at a = 0 exactly
   (synchronous sampling); a small, a- and SNR-dependent closed-loop bias.
-- Runtime: Part B ~20 min (4 processes), Part D ~72 min (8 processes,
-  CPU-bound blocks scale better than Step 3's memory-bound evaluations).
-  The final D.7 case was killed by the memory reaper once and redone in
-  two halves (`--max-real 2`).
+- The a = 0 offset is reproduced by `../check_detector_offset.py` (~30 s)
+  and `../study_characteristic.py --near-zero` (saved data).
+
+Decisions Yogev took during Step 4 (all runs above use them):
+- Part B: full spec (79 values of a × 64 blocks × 9 SNRs × 2 lag sets),
+  rather than fewer blocks on the wide grid.
+- Part D: option A, R = 8 realisations × L = 2000 steady-state blocks
+  (NMSE to ±11 %), transient 1633 blocks; D.7 run as a reduced comparison
+  (Δ = {0..15}, a ∈ {1e-4, 1e-3}, 20 dB / WP / 0 dB, R = 4, L = 1000).
+- The last D.7 case, killed by the memory reaper, was redone in two halves
+  (`--max-real 2`) rather than skipped.
+- Yogev's `.docx` reports are not committed.
+
+Runtimes (compute): Part A < 1 min; Part B ~20 min (4 processes); Part C
+~6 min; Part D ~72 min (8 processes — the loop blocks are CPU-bound and
+scale better than Step 3's memory-bound evaluations), against the ~45 min
+estimated and approved; ~10 min more lost to the killed D.7 run. Total
+~100 min.
 
 Practical notes:
 - Long background Monte-Carlo runs launched from Claude Code have been
@@ -220,3 +234,26 @@ directory.
   grounded in the math from [OCDM]/[CBSFS], not hand-wavy.
 - Language: conversation with him elsewhere has been in Hebrew; code,
   comments and this file are in English to match the existing codebase.
+
+## Working rules for Claude (set by Yogev, apply in every session)
+
+- **Ask before acting.** Before running any command, changing any code or
+  file in the repo, or committing/pushing, describe the action and get
+  Yogev's approval. Reading and searching are fine without asking. A task
+  file or a fully specified request counts as approval for the work it
+  describes (including its commit/push step), not for anything beyond it.
+- **Ask before long runs.** Estimate the runtime first (time a `--quick`
+  run) and ask before any run longer than ~20 min, with options (fewer
+  trials, fewer points) and their precision cost.
+- **Never restart a job that Claude Code's low-memory safeguard stopped**
+  without asking. Report what was stopped and what is saved.
+- **Long runs:** foreground only (a call is capped at 10 min; past that it
+  moves to the background, where the reaper can kill it). Every study
+  script saves incrementally and has `--quick`, `--resume`, `--max-new`
+  (and `--max-real` in `study_loop.py`) so a run can be split into
+  < 10-min calls; `--replot` redoes tables and figures from saved data.
+- **Report honestly:** say when a run took longer than estimated, when a
+  result is unexpected (and investigate it), and do not tune parameters to
+  make a figure look good.
+- Do not commit Yogev's own documents (e.g. `.docx` reports) unless asked.
+- The repo is private (`yogevdrori/OCDM-Doppler`); keep it private.

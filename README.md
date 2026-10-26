@@ -50,6 +50,7 @@ Scripts (run from this directory; need `matplotlib` for the figures):
 | `study_scurve.py` | Step 3: discriminator S-curves, metrics and the tau-domain contrast → `results/scurve.csv` / `.md` / `_log.txt`, raw costs in `results/scurve_raw/`, `figures/fig_scurve_*.png`; `--quick`, `--resume`, `--max-new` (~27 min compute, 4 processes), `--replot` (tables + figures from the raw data only, seconds) |
 | `study_snr_definitions.py` | Step 4 A: SNR definitions, simulated SER, 10 % working point → `results/snr_definitions.*`, `figures/fig_ser_working_point.png` (~10 s) |
 | `study_characteristic.py` | Step 4 B: open-loop detector characteristic vs true `a`, Δ = {0} vs {0..15} → `results/characteristic.*`, raw `results/char_raw/`, `figures/fig_char_*.png` (~20 min, 4 processes; `--quick`, `--resume`, `--max-new`, `--replot`) |
+| `check_detector_offset.py` | Step 4: the a = 0 detector-offset check (256 fresh noiseless blocks, ~30 s) |
 | `study_loop.py` | Step 4 C/D: `--part C` convergence times (~2 min); `--part D` closed loop vs SNR → `results/loop_sim.*`, raw `results/loop_raw/`, `figures/fig_loop_*.png` (~70 min, 8 processes; `--quick`, `--resume`, `--max-new`, `--max-real`, `--replot`) |
 | `study_cbsfs_accuracy.py` | CB-SFS sweeps over `M`, `N_seg`, harmonic index (tables below) |
 
@@ -348,8 +349,10 @@ K_d0 = 175.5 for both lag sets (noiseless).
   **20.6 RM/sample** instead of 300 (|Y|² is real; with lag 0 counted as
   complex the Step-3 convention gives 26.6 and 306).
 - **Unexpected: an offset at a = 0 exactly** (+1.1e-5, 11 σ in a separate
-  check with 256 fresh blocks, both δ = 0.25 and 0.5 /N_seg). It is absent
-  at a = 2.5e-4, 5e-4, 1e-3 (≤ 1.5 σ). At a = 0 the receiver samples
+  check with 256 fresh blocks, both δ = 0.25 and 0.5 /N_seg:
+  `python check_detector_offset.py`). It is absent at a = 2.5e-4, 5e-4,
+  1e-3 (≤ 1.5 σ), and in the Part B data only the a = 0 point is offset
+  (`python study_characteristic.py --near-zero`). At a = 0 the receiver samples
   synchronously (N_sym = 20 samples per symbol), so the sampled signal is
   exactly cyclostationary and the guard-interval zeros fall on the same
   sample positions in every symbol. The mechanism is not yet understood;
