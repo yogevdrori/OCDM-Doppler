@@ -16,6 +16,12 @@ from .params import SystemParams, preset_noiseless_31jan, preset_noisy_22jan
 from .signal_model import OCDMSignal, draw_symbols, chirp_matrix
 from . import analytical_af
 from . import cbsfs
+from .doppler_profile import (DopplerProfile, ConstantDoppler, RampDoppler,
+                              SinusoidalDoppler, FlyByDoppler,
+                              PiecewiseLinearDoppler, CallableDoppler,
+                              as_profile)
+from .signal_tv import rx_profile, rx_nominal_profile
+from .loop_tv import run_loop_profile, ProfileLoopResult
 
 __all__ = [
     "SystemParams",
@@ -26,4 +32,17 @@ __all__ = [
     "chirp_matrix",
     "analytical_af",
     "cbsfs",
+    # Step 5: time-varying Doppler
+    "DopplerProfile",
+    "ConstantDoppler",
+    "RampDoppler",
+    "SinusoidalDoppler",
+    "FlyByDoppler",
+    "PiecewiseLinearDoppler",
+    "CallableDoppler",
+    "as_profile",
+    "rx_profile",
+    "rx_nominal_profile",
+    "run_loop_profile",
+    "ProfileLoopResult",
 ]

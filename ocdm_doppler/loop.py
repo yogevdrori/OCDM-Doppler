@@ -120,8 +120,8 @@ def run_loop(params: SystemParams, a, mu: float, n_blocks: int,
     """
     if callable(a) or np.ndim(a) != 0:
         raise NotImplementedError(
-            "time-varying a needs a signal_model.py change (integrated "
-            "Doppler); not allowed without approval -- see loop.py")
+            "run_loop takes a constant a; for a time-varying Doppler use "
+            "loop_tv.run_loop_profile with a doppler_profile.DopplerProfile")
     a = float(a)
     delta = 0.25 / N_seg if delta is None else float(delta)
     p = params.with_(a_true=a, snr_db=float("inf"))
