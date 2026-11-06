@@ -75,11 +75,11 @@ rather than just re-reading the papers:
    (task file `../tasks/step4_detector_and_loop.md`): SNR working point,
    open-loop characteristic vs the true a for Δ = {0} and {0..15}, loop
    convergence time, closed-loop simulation vs SNR.
-5. **Step 5 (next)** — full closed-loop detector development (the actual
-   project deliverable): tracking a time-varying Doppler, loop bandwidth.
-   Needs a time-varying a in `signal_model.py` — **ask before changing it**.
+5. **Step 5 (done)** — tracking a time-varying Doppler a(t) and the choice
+   of loop pole (task file `../tasks/step5_time_varying_doppler.md`), built
+   in new modules without changing `signal_model.py`.
 
-## Status: Steps 1–4 complete (Step 1 details below)
+## Status: Steps 1–5 complete (Step 1 details below)
 
 Package `ocdm_doppler/` (this directory), pure NumPy, no third-party deps
 beyond `numpy`. 10/10 sanity checks pass (`python verify_infrastructure.py`;
@@ -185,7 +185,65 @@ scale better than Step 3's memory-bound evaluations), against the ~45 min
 estimated and approved; ~10 min more lost to the killed D.7 run. Total
 ~100 min.
 
+### Step 5 (new files only; "add, do not change")
+
+**Rule (Yogev, not negotiable): add, do not change.** New capability goes
+into new files that reuse the existing classes. Do not modify `params.py`,
+`signal_model.py`, `analytical_af.py`, `cbsfs.py`, `af_estimation.py`,
+`curve_fit.py`, `discriminator.py`, or the existing functions of `loop.py`.
+Allowed: `__init__.py` exports, docs, and (Step 5) the text of
+`loop.run_loop`'s `NotImplementedError`. If something seems to need a change
+to an existing module, stop and ask with the reason and the minimal change.
+`verify_time_varying.py` check 4 confirms the protected modules are
+unchanged (git diff) and that committed raw data recomputes bit-identically.
+
+| file | contents |
+|---|---|
+| `doppler_profile.py` | `DopplerProfile` (a, closed-form A = ∫a, block_mean); `ConstantDoppler`, `RampDoppler`, `SinusoidalDoppler`, `FlyByDoppler`, `PiecewiseLinearDoppler`, `CallableDoppler`, `as_profile`. A(t) must be closed form (carrier phase 2π·1e9·A): all forms are written without cancellation (≤ 5.6e-17 s error). |
+| `signal_tv.py` | `rx_profile`, `rx_nominal_profile`: u = t + A − τ_p0, phase 2π((f_Tx − f_Rx)t + f_Tx A) + Δφ, reusing `sig._decompose`, `sig._chirp_sum`, `sig._noise`; **a `ConstantDoppler` is delegated to `OCDMSignal.rx`** so constant-a results stay bit-identical (the general formula differs from `rx` by the old code's float rounding of (1+a)·f_Tx, and is ~1000× more accurate in phase). |
+| `loop_tv.py` | `run_loop_profile`: same signal (`LongSignal`), noise stream and update as `run_loop`; `mu` and `a_hat0` may be arrays (lockstep loops, bit-identical to separate runs); result with `a_bar`, `eps = a_hat − a_bar`. Analytical `H`, `f_3db`, `sigma_ss`, `ramp_lag`, `ramp_rmse`, `optimal_g`, `sine_rmse`. |
+| `../verify_time_varying.py` | Part A.4 checks → `../results/verify_time_varying.md` |
+| `../study_tracking.py` | `--part B/C/D`; every realisation advanced in checkpointed segments (`results/track_raw/`), `--budget` stops a call cleanly before the 10-min limit, `--resume`, `--seg`, `--replot`, `--quick` |
+
+Outcome (details in README *Step 5 results*):
+- Ramp: lag = −β/g (bias-free, from up and down ramps over the same a
+  interval); optimal pole simulated = analytical grid choice in all 6
+  (r, SNR) cases; WP optimum ≈ 0.9973 / 0.9874 / 0.9425 for r = 0.1 / 1 / 10.
+- Sinusoid: gain and phase follow H(z) = g z⁻¹/(1 − p z⁻¹) within ~1 % and 1°.
+- Fly-by: RMSE matches the exact linear model within 8 %; the quasi-static
+  −β/g fails when 1/g ≈ T_c (p = 0.99, r = 100); no loss of lock.
+
+Decisions Yogev took in Step 5:
+- Lockstep μ and checkpointed segments approved; regression check by
+  recomputing committed raw data.
+- Part B: up AND down ramps for all r (so the a-dependent detector bias
+  cancels in the lag); p = 0.998 added for r = 0.1, 1 only; r = 10 uses
+  L = 2500 (not 3000) so both directions stay within |a| ≤ 1e-3; optimal
+  pole based on the bias-removed RMSE.
+- Part C: R = 4, all points kept (no frequency dropped).
+- Part D: p = 0.7512 (analytical r = 100 optimum) added; Part B's r = 10
+  analytical optimum 0.9425 added (the simulated one, 0.95, already in set).
+- The a-dependent detector bias is an open item — **not to be investigated
+  in Step 5** (Yogev's instruction).
+
+Runtimes (wall clock, this machine): A ~4 min; B ~120 min (estimated ~56;
+contention with 8 processes and low free memory); C ~127 min, of which
+~80 min were two stalls (the machine apparently slept / swapped during two
+segments) — ~46 min of compute; D ~19 min. Total ~4.5 h wall, ~3.1 h of
+compute.
+
+Open items:
+- The constant-a detector bias varies with a (+1.3e-6 at a = 5e-4 vs
+  −0.56e-6 over [4.35, 5.65]e-4; Part B WP ramp bias −1.1 to −1.6e-6, the
+  opposite sign to Step 4's +1.0e-6 at a = 5e-4; fly-by excess of 3e-6 to
+  1.2e-5 at a ≈ −9e-5). Probably the same phenomenon as the Step 4 bias floor
+  and the a = 0 sampling-phase offset.
+
 Practical notes:
+- Throughput: with 8 processes the 10–12 lockstep loops per block ran at
+  ~160 ms/block/worker (vs ~50 with 2): 8 processes give only ~25 % more
+  than 2–4. Use 4. Time a `--quick` run with the real process count before
+  estimating.
 - Long background Monte-Carlo runs launched from Claude Code have been
   killed repeatedly by the idle-session low-memory reaper (not by the
   scripts, ~300 MB/process); PyCharm alone used ~4.7 GB of the 15.7 GB.

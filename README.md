@@ -22,7 +22,7 @@ Sources:
 | 2 | Section-4 curve-fitting estimator + reproduction of the documents' figures and tables | done (see *Step 2 results*) |
 | 3 | early-late discriminator S-curve (proof of concept for the loop) | done (see *Step 3 results*) |
 | 4 | proposal to Ron; his feedback: detector characteristic vs true a, Δ = {0} vs all lags, SNR working point, first-order loop | done (see *Step 4 results*) |
-| 5 | closed-loop detector: tracking a time-varying Doppler, loop bandwidth trade-off | next (needs a time-varying `a` in `signal_model.py` — to be approved) |
+| 5 | tracking a time-varying Doppler a(t): ramp (choice of pole), sinusoid (frequency response), fly-by | done (see *Step 5 results*); built in new modules, existing ones unchanged |
 
 ## Layout
 
@@ -38,6 +38,9 @@ Package `ocdm_doppler/` (NumPy only):
 | `curve_fit.py` | documents' Step 3: `|A0|^2` and `tau_p0` estimates, MSE curve fit over `N_a` candidate Doppler values |
 | `discriminator.py` | early-late discriminator on the CB-SFS cost (29): `predicted_alpha`, `early_late`, `s_curve`; `e > 0` means `a_hat` too small; default `delta = 0.25/N_seg` (selected in Step 3) |
 | `loop.py` | first-order loop `a_hat += mu e` on consecutive blocks of one long received signal (`run_loop`; data symbols generated lazily, per-block noise, several SNRs in lockstep); `n95`, `steady_state_var`; constant `a` only |
+| `doppler_profile.py` | Step 5: Doppler profiles a(t) with closed-form A(t) = ∫a and `block_mean`: `ConstantDoppler`, `RampDoppler`, `SinusoidalDoppler`, `FlyByDoppler`, `PiecewiseLinearDoppler` (any profile through points), `CallableDoppler` (user a(t) + closed-form A(t)), `as_profile` |
+| `signal_tv.py` | Step 5: `rx_profile`, `rx_nominal_profile` — received signal for any profile (time warp t + A(t) − τ_p0, carrier phase 2π((f_Tx − f_Rx)t + f_Tx A(t))), reusing `OCDMSignal` internals; works for `OCDMSignal` and `loop.LongSignal`; a `ConstantDoppler` is delegated to `OCDMSignal.rx` (bit-identical to all old results) |
+| `loop_tv.py` | Step 5: `run_loop_profile` — the loop of `loop.run_loop` for any profile (same signal, noise and update; several μ in lockstep), result with `a_bar`, `eps`; analytical `H`, `f_3db`, `ramp_lag`, `ramp_rmse`, `optimal_g`, `sine_rmse` |
 
 Scripts (run from this directory; need `matplotlib` for the figures):
 
@@ -52,6 +55,8 @@ Scripts (run from this directory; need `matplotlib` for the figures):
 | `study_characteristic.py` | Step 4 B: open-loop detector characteristic vs true `a`, Δ = {0} vs {0..15} → `results/characteristic.*`, raw `results/char_raw/`, `figures/fig_char_*.png` (~20 min, 4 processes; `--quick`, `--resume`, `--max-new`, `--replot`) |
 | `check_detector_offset.py` | Step 4: the a = 0 detector-offset check (256 fresh noiseless blocks, ~30 s) |
 | `study_loop.py` | Step 4 C/D: `--part C` convergence times (~2 min); `--part D` closed loop vs SNR → `results/loop_sim.*`, raw `results/loop_raw/`, `figures/fig_loop_*.png` (~70 min, 8 processes; `--quick`, `--resume`, `--max-new`, `--max-real`, `--replot`) |
+| `verify_time_varying.py` | Step 5 A.4: verification of the time-varying code → `results/verify_time_varying.md` (~4 min) |
+| `study_tracking.py` | Step 5 B/C/D: `--part B` ramp (up and down) and optimal pole, `--part C` sinusoid / frequency response, `--part D` fly-by → `results/tracking_{ramp,sine,flyby}.*`, raw `results/track_raw/`, `figures/fig_track_*.png`; checkpointed segments (`--resume`, `--budget`, `--seg`, `--quick`, `--replot`) |
 | `study_cbsfs_accuracy.py` | CB-SFS sweeps over `M`, `N_seg`, harmonic index (tables below) |
 
 ## Design decisions worth knowing
@@ -432,11 +437,140 @@ At 20 dB ≈ 2×, at 0 dB 10–16×. **Recommendation: Δ = {0}.**
 - **Q1, Q2** (advisor): the open-loop characteristic (B) and the
   closed-loop one (`fig_loop_vs_a.png`) are both available; the SNR mapping
   is in A.
-- **Tracking a time-varying Doppler** (the case for a loop) needs an
-  integrated Doppler in `signal_model.py` (u(t) = t + ∫a − τ_p0), which the
-  Step-1 constraint does not allow without approval. `loop.run_loop`
-  raises `NotImplementedError` for a non-constant a.
+- **Tracking a time-varying Doppler** (the case for a loop): done in
+  Step 5, in new modules (`doppler_profile.py`, `signal_tv.py`,
+  `loop_tv.py`) without changing `signal_model.py`; `loop.run_loop`
+  points to `loop_tv.run_loop_profile` for a non-constant a.
 - The small closed-loop bias (and the a = 0 offset) are not explained yet.
+
+## Step 5 results: tracking a time-varying Doppler
+
+Task file `tasks/step5_time_varying_doppler.md`. Settings as Step 4:
+22-Jan preset (BPSK), Δ = {0}, N_c = 24000 (block 6 ms), N_seg = 2048,
+δ = 0.25/N_seg, K_d0 = 175.5, μ = (1 − p)/K_d0; noiseless and the working
+point σ_D²/P_n = 4.0 dB (σ_e/K_d = 1.60e-5 noiseless, 4.59e-5 at the WP);
+|a| ≤ 1e-3 throughout.
+
+**Rule: add, do not change.** A time-varying a(t) enters only through
+A(t) = ∫a: time warp u = t + A(t) − τ_p0, carrier phase
+2π((f_Tx − f_Rx)t + f_Tx A(t)). This is implemented in three new modules
+that reuse the existing classes; the Step 1–4 modules are untouched
+(allowed edits only: `__init__.py` exports, the text of `loop.run_loop`'s
+`NotImplementedError`).
+
+### A. Verification (`results/verify_time_varying.md`, all passing)
+
+| check | result |
+|---|---|
+| `rx_profile(ConstantDoppler)` vs `OCDMSignal.rx`, noisy (≤ 1 s) and noiseless (≤ 120 s) | **0** (delegated, bit-identical) |
+| general formula with a constant profile vs `rx`, against a 50-digit reference, t ≤ 120 s | carrier phase error **old 9.0e-5 rad, new 9.8e-8 rad**; time warp 1.3e-14 s vs 7.4e-15 s. The old/new difference (up to 1.4e-4 in Y) is the old formula's float rounding of (1+a)·f_Tx. |
+| `run_loop_profile(ConstantDoppler)` vs `run_loop`; lockstep vs separate μ | **0** (bit-for-bit) |
+| A(t) closed form vs Gauss–Legendre, 8 profiles, t ≤ 120 s | ≤ **5.6e-17 s** (3.5e-7 rad carrier phase; required ~1e-13 s) |
+| record in one piece vs block by block; loop in segments vs one run | **0** |
+| committed Step 4 raw data recomputed (Part B e, Part D trajectory) | **0** (bit-identical) |
+| in-block Doppler change, β = 3.25e-7 per block: paired ramp − staircase (same block means) | **−3.1e-9 ± 3.8e-9** (1 % of β): no in-block bias |
+
+### B. Ramp and the choice of pole (`results/tracking_ramp.md`)
+
+β = r·g·σ_ss per block with g = 0.01, σ_ss = 3.25e-6, r ∈ {0.1, 1, 10}
+(β = 3.25e-9 / 3.25e-8 / 3.25e-7 per block = 5.4e-7 / 5.4e-6 / 5.4e-5 /s);
+poles {0.9, 0.95, 0.98, 0.99, 0.995}, plus 0.998 for r = 0.1, 1. Every ramp
+is run **up and down over the same a interval**, so
+(ε_up − ε_down)/2 is the lag free of any a-dependent detector bias and
+(ε_up + ε_down)/2 the bias. 8 realisations × 3000 blocks (2500 for r = 10,
+to keep |a| ≤ 1e-3 in both directions) after 3·n95 of the slowest pole.
+`figures/fig_track_lag.png`, `fig_track_rmse_vs_pole.png`.
+
+- **The lag is −β/g**, e.g. r = 10: −3.23e-6 / −6.47e-6 / −3.24e-5 /
+  −6.49e-5 for p = 0.9 / 0.95 / 0.99 / 0.995 (predicted −3.25e-6 /
+  −6.51e-6 / −3.25e-5 / −6.51e-5, noiseless); r = 1, p = 0.99: −3.36e-6 ±
+  0.08e-6 (noiseless), −3.58e-6 ± 0.18e-6 (WP) vs −3.25e-6. With the up/down
+  design even the r = 0.1 lag is resolved (noiseless, p ≥ 0.98: e.g.
+  p = 0.998: −1.65e-6 ± 0.07e-6 vs −1.63e-6); a single direction alone
+  would be dominated by the detector bias.
+- **The bias** (ε_up + ε_down)/2 is the same for every pole (a detector
+  property): ≈ −3e-7 noiseless and −1.1 to −1.6e-6 at the WP.
+- **Std and RMSE** follow (σ_e/K_d)√(g/(2−g)) and √((β/g)² +
+  (σ_e/K_d)²g/(2−g)) within ~10 %; for r = 10 the noiseless std is 20–70 %
+  higher, because its measurement interval spans a ∈ ±4e-4 and the
+  a-dependent bias shows up as extra variance.
+
+**Optimal pole** (simulated: lowest **bias-removed** RMSE on the grid; the
+per-direction RMSE gives the same choice):
+
+| r | β per block | analytical p_opt, noiseless / WP | simulated (grid), noiseless / WP | min. RMSE at the WP |
+|---|---|---|---|---|
+| 0.1 | 3.25e-9 | 0.9945 / 0.9973 | 0.995 / 0.998 | 2.2e-6 |
+| 1 | 3.25e-8 | 0.9747 / 0.9874 | 0.98 / 0.99 | 4.9e-6 |
+| 10 | 3.25e-7 | 0.8863 / 0.9425 | 0.9 / 0.95 | 1.03e-5 |
+
+In all six cases the simulated optimum is the grid point the analytical
+curve selects.
+
+### C. Sinusoid: frequency response (`results/tracking_sine.md`)
+
+a(t) = 5e-4 sin(2πft), f = x·f_3dB(p), x ∈ {0.1, 0.3, 1, 3}, poles
+0.9 (f_3dB = 2.797 Hz) and 0.99 (0.2666 Hz), both poles on every profile
+(so each pole also gets the other's frequencies); 4 realisations, ≥ 3
+periods after the transient (the longest run: 118 s).
+`figures/fig_track_sine_response.png`, `fig_track_sine_example.png`.
+
+**The loop follows H(z) = g z⁻¹/(1 − p z⁻¹) at every point**, noiseless and
+at the WP: e.g. at f_3dB, p = 0.99: gain 0.7072 / 0.7076 (noiseless / WP)
+vs 0.7071, phase −45.2° vs −45.3°; p = 0.9: 0.7056 / 0.7044 vs 0.7071,
+−48.0° vs −48.1°; at 31.5 f_3dB (p = 0.99): 0.0322 vs 0.0319. Gain errors
+≤ 0.9 % noiseless and ≤ 1.3 % at the WP (largest where the gain is only
+0.03), phase within 1°; the tracking RMSE matches
+√(amp²|1 − H|²/2 + (σ_e/K_d)²g/(2 − g)) within 0–8 %.
+
+### D. Fly-by (`results/tracking_flyby.md`)
+
+a(t) = −5e-4 (t − t0)/√((t − t0)² + T_c²) with peak slope per block equal
+to β(r = 10) (T_c = 9.22 s, 73.8 s run) and β(r = 100) (T_c = 0.922 s,
+7.4 s run); poles {0.9, 0.95, 0.99}, Part B's analytical WP optimum for
+r = 10 (0.9425; the simulated optimum 0.95 is already in the set) and, for
+r = 100, its own analytical optimum (0.7512); â_0 = a(0), 4 realisations.
+`figures/fig_track_flyby_r10.png`, `fig_track_flyby_r100.png`.
+
+| r | p | peak error (smoothed mean), noiseless | linear-model prediction | quasi-static β/g | RMSE at the WP (pred.) |
+|---|---|---|---|---|---|
+| 10 | 0.9 | 7.0e-6 | 3.25e-6 | 3.25e-6 | 1.10e-5 (1.06e-5) |
+| 10 | 0.95 | 9.5e-6 | 6.5e-6 | 6.5e-6 | **7.85e-6** (7.76e-6) |
+| 10 | 0.99 | 3.29e-5 | 3.23e-5 | 3.25e-5 | 1.20e-5 (1.29e-5) |
+| 100 | 0.9 | 4.1e-5 | 3.2e-5 | 3.25e-5 | **1.61e-5** (1.63e-5) |
+| 100 | 0.95 | 7.0e-5 | 6.4e-5 | 6.5e-5 | 2.54e-5 (2.59e-5) |
+| 100 | 0.99 | **2.55e-4** | 2.54e-4 | 3.25e-4 | 1.11e-4 (1.12e-4) |
+| 100 | 0.7512 | 2.5e-5 | 1.3e-5 | 1.3e-5 | 1.83e-5 (1.80e-5) |
+
+- **The RMSE over the run matches the exact linear model** (a_bar through
+  â ← â + g(a_bar − â)) within 8 % for every pole, noiseless and at the
+  WP. The loop never loses lock (largest error 2.6e-4, far inside the
+  ±1e-2 pull-in range).
+- **The quasi-static rule ε ≈ −β(t)/g holds when the loop memory 1/g is
+  short compared with T_c**; for p = 0.99 at r = 100 (memory 100 blocks vs
+  T_c = 154 blocks) it overstates the peak (3.25e-4 vs 2.55e-4 measured,
+  which the linear model predicts).
+- **Best pole by RMSE at the WP:** r = 10: 0.95 (7.85e-6), close to Part B's
+  ramp optimum (0.9425–0.95). r = 100: 0.9 (1.61e-5), *slower* than the
+  ramp optimum for its peak slope (0.75, 1.83e-5) — as the linear model
+  also predicts, because the fly-by has its peak slope only around t0.
+- **Unexpected:** for the fast poles the smoothed peak error is 3–4e-6
+  (r = 10) and 0.7–1.2e-5 (r = 100) above the linear model, 3–5× the
+  independent-noise floor, and common to all fast poles. In both fly-bys
+  the peak sits where **a ≈ −9e-5** (t0 + 1.6 s and t0 + 0.17 s), not at
+  t0 (a = 0, where the excess is small). This points to the a-dependent
+  detector bias (open item below), not to the tracking itself; not
+  investigated in this step.
+
+### Open items after Step 5
+
+- **The constant-a detector bias varies with a**: +1.3e-6 ± 0.4e-6 at
+  a = 5e-4 vs −0.56e-6 ± 0.4e-6 averaged over a ∈ [4.35, 5.65]e-4
+  (`results/verify_time_varying.md`, check 5). In Part B the WP bias of the
+  ramps is −1.1 to −1.6e-6, the opposite sign to Step 4's constant a = 5e-4
+  (+1.0e-6), and the fly-by peak errors show an excess at a ≈ −9e-5.
+  Probably the same phenomenon as the Step 4 closed-loop bias floor and the
+  a = 0 (synchronous-sampling) offset. Not investigated yet.
 
 ## Step 1 findings (CB-SFS)
 
