@@ -22,6 +22,9 @@ from .doppler_profile import (DopplerProfile, ConstantDoppler, RampDoppler,
                               as_profile)
 from .signal_tv import rx_profile, rx_nominal_profile
 from .loop_tv import run_loop_profile, ProfileLoopResult
+from .loop_filters import (LoopFilter, FirstOrderFilter, SecondOrderFilter,
+                           Design, make_filter)
+from .loop_tv2 import run_loop_filters, FilterLoopResult
 
 __all__ = [
     "SystemParams",
@@ -45,4 +48,12 @@ __all__ = [
     "rx_nominal_profile",
     "run_loop_profile",
     "ProfileLoopResult",
+    # Step 6: loop filters, second-order loop
+    "LoopFilter",
+    "FirstOrderFilter",
+    "SecondOrderFilter",
+    "Design",
+    "make_filter",
+    "run_loop_filters",
+    "FilterLoopResult",
 ]
