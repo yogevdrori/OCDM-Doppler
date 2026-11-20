@@ -23,6 +23,7 @@ Sources:
 | 3 | early-late discriminator S-curve (proof of concept for the loop) | done (see *Step 3 results*) |
 | 4 | proposal to Ron; his feedback: detector characteristic vs true a, Δ = {0} vs all lags, SNR working point, first-order loop | done (see *Step 4 results*) |
 | 5 | tracking a time-varying Doppler a(t): ramp (choice of pole), sinusoid (frequency response), fly-by | done (see *Step 5 results*); built in new modules, existing ones unchanged |
+| 6 | second-order tracking loop vs first-order loop | **in progress**: Part A (implementation, verification) and Part B (constant a, acquisition) done; Parts C (ramp), D (fly-by), E (frequency response) and the robustness check pending (see *Step 6 results*) |
 
 ## Layout
 
@@ -41,6 +42,8 @@ Package `ocdm_doppler/` (NumPy only):
 | `doppler_profile.py` | Step 5: Doppler profiles a(t) with closed-form A(t) = ∫a and `block_mean`: `ConstantDoppler`, `RampDoppler`, `SinusoidalDoppler`, `FlyByDoppler`, `PiecewiseLinearDoppler` (any profile through points), `CallableDoppler` (user a(t) + closed-form A(t)), `as_profile` |
 | `signal_tv.py` | Step 5: `rx_profile`, `rx_nominal_profile` — received signal for any profile (time warp t + A(t) − τ_p0, carrier phase 2π((f_Tx − f_Rx)t + f_Tx A(t))), reusing `OCDMSignal` internals; works for `OCDMSignal` and `loop.LongSignal`; a `ConstantDoppler` is delegated to `OCDMSignal.rx` (bit-identical to all old results) |
 | `loop_tv.py` | Step 5: `run_loop_profile` — the loop of `loop.run_loop` for any profile (same signal, noise and update; several μ in lockstep), result with `a_bar`, `eps`; analytical `H`, `f_3db`, `ramp_lag`, `ramp_rmse`, `optimal_g`, `sine_rmse` |
+| `loop_filters.py` | Step 6: loop filters `FirstOrderFilter` (â += μe), `SecondOrderFilter` (b̂ += μ2 e; â += b̂ + μ1 e), `make_filter`; design helpers (poles, (ζ, ω_n), critically damped, `design_equal_BL`), closed-loop `H2`, `f_3db`, exact `B_L` (discrete Lyapunov), `linear_response`, `step_response`, `n95`, `overshoot`, steady-state ramp / parabola errors, `closed_loop_poles` (with K_d/K_d0); `Design`, `first_order_design`, `equal_BL_design` |
+| `loop_tv2.py` | Step 6: `run_loop_filters` — the loop of `run_loop_profile` with filter objects (same signal, noise stream, detector call; all filters × SNRs in lockstep; `states` to continue a run exactly); `FirstOrderFilter` reproduces `run_loop_profile` bit for bit |
 
 Scripts (run from this directory; need `matplotlib` for the figures):
 
@@ -57,6 +60,9 @@ Scripts (run from this directory; need `matplotlib` for the figures):
 | `study_loop.py` | Step 4 C/D: `--part C` convergence times (~2 min); `--part D` closed loop vs SNR → `results/loop_sim.*`, raw `results/loop_raw/`, `figures/fig_loop_*.png` (~70 min, 8 processes; `--quick`, `--resume`, `--max-new`, `--max-real`, `--replot`) |
 | `verify_time_varying.py` | Step 5 A.4: verification of the time-varying code → `results/verify_time_varying.md` (~4 min) |
 | `study_tracking.py` | Step 5 B/C/D: `--part B` ramp (up and down) and optimal pole, `--part C` sinusoid / frequency response, `--part D` fly-by → `results/tracking_{ramp,sine,flyby}.*`, raw `results/track_raw/`, `figures/fig_track_*.png`; checkpointed segments (`--resume`, `--budget`, `--seg`, `--quick`, `--replot`) |
+| `check_bias_phase.py` | Yogev's check of the detector bias vs the sampling phase (integer vs non-integer shift a·N_c per block) → `results/bias_phase_check.md` |
+| `verify_second_order.py` | Step 6 A: verification of the loop filters → `results/verify_second_order.md` (~7 min) |
+| `study_second_order.py` | Step 6: `--part B` constant a and acquisition → `results/so_constant.md`, `so_steady.csv`, `so_acquisition.csv`, raw `results/so_raw/`, `figures/fig_so_*.png`; all realisations of all cases advance in checkpointed rounds (`--resume`, `--budget`, `--seg`, `--procs`, `--quick`, `--replot`); Parts C–E to be added |
 | `study_cbsfs_accuracy.py` | CB-SFS sweeps over `M`, `N_seg`, harmonic index (tables below) |
 
 ## Design decisions worth knowing
@@ -571,6 +577,102 @@ r = 100, its own analytical optimum (0.7512); â_0 = a(0), 4 realisations.
   (+1.0e-6), and the fly-by peak errors show an excess at a ≈ −9e-5.
   Probably the same phenomenon as the Step 4 closed-loop bias floor and the
   a = 0 (synchronous-sampling) offset. Not investigated yet.
+
+## Step 6 results: second-order loop (in progress — Parts A and B)
+
+Task file `tasks/step6_second_order_loop.md`. Settings as Step 5 (22-Jan
+preset, Δ = {0}, N_c = 24000, N_seg = 2048, δ = 0.25/N_seg, K_d0 = 175.5,
+noiseless and the WP 4.0 dB). Same rule: **add, do not change** — two new
+modules (`loop_filters.py`, `loop_tv2.py`), no existing module modified.
+Constant Doppler values use a **non-integer shift per block** (a·N_c not an
+integer: 5.1542e-4, −4.8458e-4, 9.8458e-4), because at integer shifts the
+sampling phase is frozen and the detector bias is larger
+(`results/bias_phase_check.md`, Yogev's check: e.g. noiseless +1.49e-6 at
+a = 5e-4 vs −1.1e-7 at 5.1542e-4).
+
+Loop: b̂ += μ2 e; â += b̂ + μ1 e, with g = μK_d0. Closed loop
+H2(z) = ((g1+g2)z − g1)/(z² − (2−g1−g2)z + (1−g1)); zero steady-state
+error on a ramp, −γ/g2 on a parabola. Main comparison at **equal noise
+bandwidth B_L** (so equal steady-state noise): for each first-order pole
+p1 ∈ {0.9, 0.95, 0.99}, a critically damped (ζ = 1) and a ζ = 0.707
+second-order design with the same B_L.
+
+| design | g1 | g2 | B_L | n95 | overshoot |
+|---|---|---|---|---|---|
+| 1st p = 0.9 / 0.95 / 0.99 | 0.1 / 0.05 / 0.01 | 0 | 0.0526 / 0.0256 / 0.00503 | 29 / 59 / 299 | 0 |
+| 2nd ζ = 1, equal B_L | 0.0795 / 0.0399 / 0.0080 | 1.65e-3 / 4.06e-4 / 1.60e-5 | same | 101 / 205 / 1033 | 14 % |
+| 2nd ζ = 0.707, equal B_L | 0.0663 / 0.0332 / 0.0067 | 2.27e-3 / 5.62e-4 / 2.23e-5 | same | 90 / 182 / 918 | 21 % |
+
+### A. Verification (`results/verify_second_order.md`, all passing)
+
+- `FirstOrderFilter` in `run_loop_filters` == Step 5's `run_loop_profile`
+  (3 profiles × 2 μ × 2 SNRs) and `SecondOrderFilter` with μ2 = 0 == first
+  order: **0** difference; lockstep vs separate and segmented vs one run: **0**.
+- Helpers vs direct recursion: B_L (Lyapunov) vs Σh² 1.8e-9 rel.; ramp
+  steady-state error 2.7e-12·β; parabola −γ/g2 to 2.4e-13; H2 vs the
+  recursion's sinusoid response 3.1e-12. The task file's design table
+  agrees at its printed precision.
+- Noiseless ramp r = 10 (β = 3.25e-7/block), up and down: bias-free lag
+  **−1.09e-7 ± 0.66e-7** for the second-order loop (prediction 0) vs
+  −6.63e-6 ± 0.06e-6 for first order p = 0.95 (prediction −6.51e-6); bias
+  −3.1e-7 for both.
+
+### B. Constant Doppler and acquisition (`results/so_constant.md`)
+
+Run size: Yogev chose **option C** (the spec, R = 4 × L = 3000 steady
+state and R = 2 × 3000 acquisition blocks, measured at ~140 min): steady
+state R = 2 × L = 2000 after 1133 blocks (≥ n95 of the slowest design);
+acquisition 2000 blocks, R = 2 for the steps from â0 = 0, R = 1 for the
+initial-error sweep. All 9 designs and both SNRs in lockstep.
+`figures/fig_so_step_linear.png` (linear step responses at equal B_L),
+`fig_so_acquisition.png` (simulated acquisition vs linear model).
+
+- **Steady state (â0 = a, b̂0 = 0): no difference between the orders at
+  equal B_L.** Std / (σ_e/K_d)√B_L = 0.94–1.14 for all designs (0.94–1.03
+  at a = +5.15e-4, 1.07–1.14 at −4.85e-4 with 4 dB; σ_e/K_d was measured
+  at 5e-4); first and second order within ~3 % of each other. The bias is
+  the same for both orders, i.e. a detector property: |bias| ≤ 1.4e-7
+  noiseless; at the WP −1.0e-6 (a = +5.15e-4) and −1.9e-6 (−4.85e-4).
+- **Transient:** simulated n95 and overshoot follow the linear model
+  (overshoot 14 % / 21 % within ~1 point); n95 grows slowly with |ε0|
+  because the detector gain falls away from ε = 0 (first order p = 0.99:
+  299 → 343 blocks at |ε0| = 1e-2).
+- **Lock range: identical for all 9 designs.** From â0 = a ∓ Δ,
+  Δ ∈ {3, 6, 8, 9, 9.5, 10, 11}·1e-3 (true a = 5.1542e-4), every design
+  is captured for |ε0| ≤ 1e-2, noiseless and at the WP; from |ε0| = 1.1e-2
+  every design goes to the false-lock point ±1.41e-2. A second-order loop
+  (b̂0 = 0) neither widens nor narrows the lock range.
+- **Where the second-order loop is worse:** at equal B_L it settles
+  3–3.5× more slowly (n95 101 / 205 / 1033 vs 29 / 59 / 299), and after a
+  large initial error it has a long overshoot tail: for p1 = 0.99 the
+  linear model needs 984–2427 blocks before |ε| stays below 5σ_ss, vs
+  ~350 for first order.
+- **Two lock criteria in the table.** The approved one, max |ε| < 5σ_ss
+  over the last 500 blocks, tests *settled*; the p1 = 0.99 second-order
+  loops fail it for every ε0 within 2000 blocks for the reason above. A
+  second column, *captured* (max |ε| < 1e-3 and the mean error following
+  the linear tail within 5σ_ss + 25 %; the margin was set after seeing the
+  data, to allow for the slower nonlinear transient), separates that from a
+  loss of lock. Explained in `results/so_constant.md`.
+
+Runtime: ~25 min of compute (3–4 processes), plus a slow first round with
+0.8 GB free memory (353 ms/block/worker instead of ~80) and one 46-min
+stall (machine asleep or swapping); with little free memory the rounds ran
+at ~500 ms/block/worker.
+
+### Pending (Step 6)
+
+- **Part C:** ramps r ∈ {1, 10}, up and down; second order b̂0 = β; discard
+  ≥ 900 blocks; drift check (first half up vs second half down); compare
+  with the best first-order pole (0.99 for r = 1, 0.95 for r = 10).
+- **Part D:** fly-bys (T_c = 9.22 s, 0.922 s): ζ = 1 p ∈ {0.95, 0.97,
+  0.98, 0.99, 0.995}, ζ = 0.707 at the best B_L from the linear model, and
+  the best first-order pole (0.95 / 0.9), in lockstep; b̂0 = true slope at
+  t = 0.
+- **Part E:** sinusoid, designs equal to p1 = 0.99, f/f_3dB(H2) ∈ {0.1, 0.3,
+  1, 3} (likely long: estimate first).
+- **Robustness:** poles with K_d = 0.549·K_d0; short runs at −5 dB.
+- Each part: timed `--quick` estimate first, ask above ~35 min.
 
 ## Step 1 findings (CB-SFS)
 

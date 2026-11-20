@@ -78,8 +78,11 @@ rather than just re-reading the papers:
 5. **Step 5 (done)** — tracking a time-varying Doppler a(t) and the choice
    of loop pole (task file `../tasks/step5_time_varying_doppler.md`), built
    in new modules without changing `signal_model.py`.
+6. **Step 6 (in progress)** — second-order tracking loop vs first-order
+   (task file `../tasks/step6_second_order_loop.md`): Parts A and B done,
+   C–E and the robustness check pending.
 
-## Status: Steps 1–5 complete (Step 1 details below)
+## Status: Steps 1–5 complete, Step 6 Parts A–B done (Step 1 details below)
 
 Package `ocdm_doppler/` (this directory), pure NumPy, no third-party deps
 beyond `numpy`. 10/10 sanity checks pass (`python verify_infrastructure.py`;
@@ -255,6 +258,73 @@ Practical notes:
 - Windows PowerShell 5.1 mangles double quotes inside `git commit -m`
   here-strings; commit with `-F <message file>`.
 
+### Step 6 (in progress; "add, do not change" as in Step 5)
+
+Allowed edits: `__init__.py` exports, `README.md`, this file. No existing
+module (including `loop.py`, `loop_tv.py`, `signal_tv.py`,
+`doppler_profile.py`) may change; if something seems to need it, stop and
+ask.
+
+| file | contents |
+|---|---|
+| `loop_filters.py` | `LoopFilter` interface (`update`, `get_state`/`set_state`, `copy`, `gains`); `FirstOrderFilter(mu)`; `SecondOrderFilter(mu1, mu2)`: b̂ += μ2 e, â += b̂ + μ1 e; `make_filter(g1, g2, K_d0, …)` (μ = g/K_d0; g2 = 0 → first order). Design: `gains_from_poles`, `gains_critically_damped` (g1 = 1 − p², g2 = (1 − p)²), `gains_from_zeta_wn` (r = e^{−ζω_n}, θ = ω_n√(1−ζ²)), `design_equal_BL` (bisection on ω_n). Analysis: `H2`, `f_3db` (last −3 dB crossing, allows peaking), `B_L` (exact, discrete Lyapunov), `linear_response`, `step_response`, `impulse`, `n95`, `overshoot`, `ss_error_ramp` (0 for 2nd order), `ss_error_parabola` (−γ/g2), `closed_loop_poles(g1, g2, K_d/K_d0)`. `Design(name, g1, g2)` with `.BL`, `.order`, `.filter()`; `first_order_design(p)`, `equal_BL_design(p1, ζ)` (names "1st p=0.95", "2nd cd ~p1=0.95", "2nd z0.707 ~p1=0.95"). |
+| `loop_tv2.py` | `run_loop_filters(params, profile, filters, n_blocks, snrs, …, start_block, states)` → `FilterLoopResult` (`a_hat[m,s,i]`, `b_hat`, `e`, `a_bar`, `eps`, final `states`). Same signal, noise stream ([seed, 0xA015E, block]) and detector call as `run_loop_profile`; filters copied per SNR, all in lockstep. |
+| `../verify_second_order.py` | Part A checks → `../results/verify_second_order.md` (all pass, ~7 min) |
+| `../study_second_order.py` | `--part B` (C/D/E/R to be added). All unfinished realisations of all cases advance together in rounds of `--seg` blocks (one pool task per realisation), each saved to `results/so_raw/<case>__r<k>.npz`; `--budget` stops between rounds; `--resume`, `--replot`, `--quick` (→ `results/quick/`, git-ignored), `--procs`. |
+| `../check_bias_phase.py` | Yogev's check → `../results/bias_phase_check.md`: integer shift a·N_c per block freezes the sampling phase and inflates the detector bias; **use non-integer values** (5.1542e-4, −4.8458e-4, 9.8458e-4, 2.6542e-4, 1.1542e-4). |
+
+Outcome so far (details in README *Step 6 results*):
+- Part A: first-order filter == Step 5 loop bit for bit; μ2 = 0 == first
+  order; lockstep / segments 0; helpers agree with direct recursion; the
+  task file's design table reproduced; noiseless ramp r = 10: second-order
+  bias-free lag −1.1e-7 ± 0.7e-7 (vs 0), first order −6.63e-6 (vs −6.51e-6).
+- Part B (equal-B_L designs for p1 ∈ {0.9, 0.95, 0.99}, ζ = 1 and 0.707):
+  steady-state std and bias identical for both orders (std/pred
+  0.94–1.14; bias is a detector property, WP −1.0e-6 at +5.15e-4, −1.9e-6
+  at −4.85e-4); transients follow the linear model; lock range identical
+  for all designs (captured for |ε0| ≤ 1e-2, false lock at ±1.41e-2 from
+  1.1e-2); the second-order loop settles 3–3.5× more slowly, and for
+  p1 = 0.99 its overshoot tail needs 984–2427 blocks to stay below 5σ_ss.
+
+Decisions Yogev took in Step 6:
+- Part C: second-order loops start at â0 = a(0), b̂0 = β (steady state);
+  still discard ≥ 900 blocks; drift check = bias-free lag of the up first
+  half vs the down second half (same a sub-interval).
+- Acquisition: true a kept in range, â0 = a − Δ, Δ ∈ {3, 6, 8, 9, 9.5,
+  10, 11}·1e-3, both signs, first-order loops in the same sweep; lock
+  criterion max |ε| < 5σ_ss over the last 500 blocks.
+- Part D: â0 = a(0), b̂0 = true slope per block at t = 0.
+- Part B run size: **option C** (steady state R = 2 × L = 2000;
+  acquisition 2000 blocks, R = 1, steps from 0 R = 2) instead of the spec
+  (~140 min measured). Consequence: the p1 = 0.99 second-order loops cannot
+  meet the 5σ_ss criterion within 2000 blocks; Yogev chose to add a
+  "captured" column (max |ε| < 1e-3 and mean ε within 5σ_ss + 25 % of the
+  linear tail) rather than rerun longer.
+- `docs/literature.md` (Yogev's literature notes) is in the repo; `*.docx`
+  and `results/quick/` are git-ignored.
+
+Pending: Part C (ramps r ∈ {1, 10}), Part D (fly-bys), Part E (sinusoid
+for the p1 = 0.99 designs), robustness (K_d = 0.549·K_d0 poles; short
+−5 dB runs), then README/CLAUDE.md update. Timed `--quick` estimate before
+each part; ask above ~35 min.
+
+Open items:
+- The a-dependent detector bias (from Step 5) persists: WP bias −1.0e-6 at
+  a = +5.15e-4 and −1.9e-6 at −4.85e-4, identical for both loop orders.
+  Not to be investigated unless Yogev asks.
+- σ_e/K_d (4.59e-5 at the WP) was measured at a = 5e-4; the std ratio at
+  a = −4.85e-4 (1.07–1.14) suggests it is slightly larger there.
+
+Practical notes (Step 6):
+- Throughput depends strongly on free memory: ~80 ms/block/worker (18
+  lockstep loops, 3 processes, ~3 GB free) vs 350–500 ms with < 1.5 GB free
+  (PyCharm ~4.4 GB). Check free RAM before a run (Yogev's rule: ≥ 3 GB →
+  4 processes, else 3; stop and report if a round exceeds ~400
+  ms/block/worker or free memory drops below 1 GB).
+- One round stalled for 46 min (machine asleep or swapping); a call that
+  outlives 10 min moves to the background but still stops cleanly at the
+  budget check.
+
 `study_cbsfs_accuracy.py` is the sweep script that produced the numeric
 tables in the README (record length `M`, segment length `N_seg`, harmonic
 index `k`). Not part of the package; run standalone from the parent
@@ -274,7 +344,7 @@ directory.
   early-late discriminator (Step 3) will call it with exactly two `alpha`
   values straddling a predicted harmonic. Nothing in `cbsfs.py` should need
   to change for that.
-- Everything in `ocdm_doppler/` is meant to be a stable base for Steps 2-5
+- Everything in `ocdm_doppler/` is meant to be a stable base for Steps 2-6
   — Yogev's explicit instruction was to implement Step 1 so that later
   steps build *on top of* it without modifying it. New estimators
   (curve-fitting, the loop) should live in new files that import from this
