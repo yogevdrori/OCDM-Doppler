@@ -164,6 +164,9 @@ A_ACQ = 5.1542e-4
 A_ACQ2 = 9.8458e-4
 DELTAS = (3e-3, 6e-3, 8e-3, 9e-3, 9.5e-3, 10e-3, 11e-3)
 LOCK_K = 5.0          # locked: |eps| < 5 sigma_ss over the last 500 blocks
+CAPT_MAX = 1e-3       # captured: max |eps| over the last 500 blocks below
+CAPT_REL = 0.25       # this, and mean eps within 5 sigma_ss + 25 % of the
+                      # linear tail (allows the slower nonlinear transient)
 
 
 def p1_of(d):
@@ -230,14 +233,25 @@ def analyse_b(design, raw, out, figd):
         A, _ = load(raw, f"B_acq_{label}", acq_R(design, label))
         n = design["N_acq"]
         for m, d in enumerate(des):
-            lin = lf.linear_response(d.g1, d.g2, np.full(n, a), a + eps0)
-            eps_lin = lin[:n] - a
+            n_long = 20 * n
+            lin = lf.linear_response(d.g1, d.g2, np.full(n_long, a),
+                                     a + eps0)[:n_long] - a
+            eps_lin = lin[:n]
             for s_i, snr in enumerate(SNRS):
                 eps = A[:, m, s_i, :n] - a                      # R x n
                 m_eps = eps.mean(0)
                 s_ss = S_EK[snr] * math.sqrt(d.BL)
                 fin = float(np.abs(eps[:, -500:]).max())
                 locked = fin < LOCK_K * s_ss
+                # blocks the linear tail needs to stay below 5 sigma_ss
+                bad = np.flatnonzero(np.abs(lin) >= LOCK_K * s_ss)
+                settle_lin = int(bad[-1] + 1) if bad.size else 0
+                # captured: far from the false-lock points (+/-1.41e-2) and
+                # following the linear tail over the last 500 blocks
+                lin_tail = float(eps_lin[-500:].mean())
+                dev = float(np.abs(eps[:, -500:].mean(1) - lin_tail).max())
+                captured = (fin < CAPT_MAX and
+                            dev < LOCK_K * s_ss + CAPT_REL * abs(lin_tail))
 
                 def n95_of(x):
                     bad = np.flatnonzero(np.abs(x) > 0.05 * abs(eps0))
@@ -249,8 +263,10 @@ def analyse_b(design, raw, out, figd):
                 rows_acq.append(dict(
                     condition=label, a=a, eps0=eps0, design=d.name,
                     order=d.order, snr_db=snr, locked=locked,
-                    final_abs_err=fin, sigma_ss=s_ss,
-                    n95=n95_of(m_eps) if locked else -1,
+                    captured=captured, final_abs_err=fin, sigma_ss=s_ss,
+                    tail_mean=float(eps[:, -500:].mean()),
+                    tail_mean_lin=lin_tail, settle_lin=settle_lin,
+                    n95=n95_of(m_eps) if captured else -1,
                     n95_lin=n95_of(eps_lin), overshoot=over(m_eps),
                     overshoot_lin=over(eps_lin),
                     max_abs_err=float(np.abs(eps).max())))
@@ -290,41 +306,78 @@ def analyse_b(design, raw, out, figd):
     L_ += ["", f"## Acquisition ({design['N_acq']} blocks; R = "
            f"{design['R_step']} for the steps from â0 = 0, "
            f"R = {design['R_acq']} for the ε0 sweep)", "",
-           f"ε0 = â0 − a. Locked: max |ε| over the last 500 blocks < "
-           f"{LOCK_K:g}·σ_ss in every realisation, σ_ss = (σ_e/K_d)·√B_L "
-           "(final |ε| below = that max). n95: first block after "
-           "which |mean ε| ≤ 0.05 |ε0| for good (−1: not locked); overshoot: "
+           "ε0 = â0 − a. Two criteria, both over the last 500 of the "
+           f"{design['N_acq']} blocks and in every realisation:", "",
+           f"- **5σ_ss** (the approved lock criterion): max |ε| < "
+           f"{LOCK_K:g}·σ_ss, σ_ss = (σ_e/K_d)·√B_L. 'final |ε|' below is "
+           "that max. This tests *settled*, not only *locked*.",
+           f"- **captured**: max |ε| < {CAPT_MAX:g} (far from the false-lock "
+           "points ±1.41e-2, and the edge of the prior range) and the mean ε "
+           "equals the linear model's tail over the same blocks to within "
+           f"{LOCK_K:g}·σ_ss + {CAPT_REL:.0%} of that tail (the margin "
+           "allows for the nonlinear detector, whose lower gain away from "
+           "ε = 0 makes large-ε0 transients up to ~15 % slower; it was set "
+           "after seeing the data, see below).", "",
+           "'settle lin' = blocks the linear model needs before |ε| stays "
+           f"below {LOCK_K:g}·σ_ss. n95: first block after which "
+           "|mean ε| ≤ 0.05 |ε0| for good (−1: not captured); overshoot: "
            "largest excursion past 0, relative to |ε0|; 'lin' = linear model "
            "(no noise, linear detector).", "",
-           "| condition | design | SNR | locked | n95 / lin | overshoot / lin "
+           "### Why the p1 = 0.99 second-order loops fail the 5σ_ss test "
+           f"within {design['N_acq']} blocks", "",
+           "At equal B_L the second-order loop's error decays as a double "
+           "(ζ = 1) or lightly damped (ζ = 0.707) pole pair at |z| ≈ 0.996, "
+           "and during the transient the integrator b̂ charges up, so the "
+           "error approaches zero through a long tail of the overshoot "
+           "(≈ ε0·(c1 + c2·n)·r^n). For p1 = 0.99 the linear model alone "
+           "needs 984–2427 blocks ('settle lin' column) to stay below "
+           f"5σ_ss (5.7e-6 noiseless, 1.6e-5 at the WP), more the larger "
+           f"|ε0|; with a 500-block test window that requires runs of "
+           f"~1500–2900 blocks, longer than the {design['N_acq']} simulated "
+           "(Part B option C). In these cases the simulated mean error "
+           "follows the linear tail (e.g. ε0 = −1e-2, ζ = 1: +7.0e-5 "
+           "simulated vs +6.0e-5 linear) and is three orders of magnitude "
+           "away from the false-lock points: the loops are captured but not "
+           "yet settled. The first-order p1 = 0.99 loop settles within "
+           "~350 blocks for every |ε0| ≤ 1e-2. This is a real drawback of "
+           "the second-order loop at equal B_L (slower settling after a "
+           "large initial error), not a loss of lock.", "",
+           "| condition | design | SNR | 5σ_ss | captured | settle lin "
+           "| n95 / lin | overshoot / lin | mean ε / lin (last 500) "
            "| final \\|ε\\| | max \\|ε\\| |",
-           "|---|---|---|---|---|---|---|---|"]
+           "|---|---|---|---|---|---|---|---|---|---|---|"]
     for x in rows_acq:
         L_.append(f"| {x['condition']} | {x['design']} | "
                   f"{snr_s(x['snr_db'])} | {'yes' if x['locked'] else 'NO'} | "
+                  f"{'yes' if x['captured'] else 'NO'} | {x['settle_lin']} | "
                   f"{x['n95']} / {x['n95_lin']} | {x['overshoot']:.1%} / "
-                  f"{x['overshoot_lin']:.1%} | {x['final_abs_err']:.1e} | "
+                  f"{x['overshoot_lin']:.1%} | {x['tail_mean']:+.1e} / "
+                  f"{x['tail_mean_lin']:+.1e} | {x['final_abs_err']:.1e} | "
                   f"{x['max_abs_err']:.1e} |")
-    # largest initial error that locks
-    L_ += ["", "## Largest initial error that locks", "",
-           "Over the sweep |ε0| ∈ {3, 6, 8, 9, 9.5, 10, 11}·1e-3, both signs "
-           "(locked in every realisation).", "",
-           "| design | SNR | largest \\|ε0\\| locked, ε0 < 0 | ε0 > 0 | "
-           "smallest \\|ε0\\| not locked |", "|---|---|---|---|---|"]
+    # largest initial error that is captured / settles
+    L_ += ["", "## Largest initial error that is captured", "",
+           "Over the sweep |ε0| ∈ {3, 6, 8, 9, 9.5, 10, 11}·1e-3, both signs, "
+           "per criterion (every realisation).", "",
+           "| design | SNR | captured: largest \\|ε0\\|, ε0 < 0 | ε0 > 0 | "
+           "smallest \\|ε0\\| not captured | 5σ_ss: largest \\|ε0\\|, ε0 < 0 "
+           "| ε0 > 0 |", "|---|---|---|---|---|---|---|"]
+
+    def largest(sel, key, sgn):
+        ok = [abs(x["eps0"]) for x in sel
+              if np.sign(x["eps0"]) == sgn and x[key]]
+        return f"{max(ok):.4g}" if ok else "none"
     for d in des:
         for snr in SNRS:
             sel = [x for x in rows_acq if x["design"] == d.name
                    and x["snr_db"] == snr and x["condition"].startswith(
                        "eps0")]
-            res = {}
-            for sgn in (-1, 1):
-                ok = [abs(x["eps0"]) for x in sel
-                      if np.sign(x["eps0"]) == sgn and x["locked"]]
-                res[sgn] = max(ok) if ok else float("nan")
-            bad = [abs(x["eps0"]) for x in sel if not x["locked"]]
-            L_.append(f"| {d.name} | {snr_s(snr)} | {res[-1]:.4g} | "
-                      f"{res[1]:.4g} | "
-                      f"{min(bad) if bad else '–'} |")
+            bad = [abs(x["eps0"]) for x in sel if not x["captured"]]
+            L_.append(f"| {d.name} | {snr_s(snr)} | "
+                      f"{largest(sel, 'captured', -1)} | "
+                      f"{largest(sel, 'captured', 1)} | "
+                      f"{min(bad) if bad else '–'} | "
+                      f"{largest(sel, 'locked', -1)} | "
+                      f"{largest(sel, 'locked', 1)} |")
     L_.append("")
     (out / "so_constant.md").write_text("\n".join(L_), encoding="utf-8")
     print("\n".join(L_))

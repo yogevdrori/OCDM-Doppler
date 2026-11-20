@@ -223,3 +223,6 @@ __marimo__/
 Thumbs.db
 desktop.ini
 .DS_Store
+# Yogev's own documents and throwaway --quick outputs
+*.docx
+results/quick/
