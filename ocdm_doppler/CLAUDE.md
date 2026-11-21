@@ -235,7 +235,8 @@ contention with 8 processes and low free memory); C ~127 min, of which
 segments) — ~46 min of compute; D ~19 min. Total ~4.5 h wall, ~3.1 h of
 compute.
 
-Open items:
+Open items (see the Step 7 note under Step 6's open items: the
+SNR-dependent part is DC-line leakage, closed):
 - The constant-a detector bias varies with a (+1.3e-6 at a = 5e-4 vs
   −0.56e-6 over [4.35, 5.65]e-4; Part B WP ramp bias −1.1 to −1.6e-6, the
   opposite sign to Step 4's +1.0e-6 at a = 5e-4; fly-by excess of 3e-6 to
@@ -257,6 +258,9 @@ Practical notes:
   little more than 2.
 - Windows PowerShell 5.1 mangles double quotes inside `git commit -m`
   here-strings; commit with `-F <message file>`.
+- **Always run Python with the project venv: `.venv\Scripts\python.exe`**
+  (from the repo root). The system Python on PATH (3.13) has no
+  matplotlib; the venv has numpy 2.5 and matplotlib 3.11.
 
 ### Step 6 (in progress; "add, do not change" as in Step 5)
 
@@ -311,7 +315,14 @@ each part; ask above ~35 min.
 Open items:
 - The a-dependent detector bias (from Step 5) persists: WP bias −1.0e-6 at
   a = +5.15e-4 and −1.9e-6 at −4.85e-4, identical for both loop orders.
-  Not to be investigated unless Yogev asks.
+  Not to be investigated unless Yogev asks. **SNR-dependent part closed in
+  Step 7** (`results/dc_removal.md`): it is leakage of the DC line of |y|²
+  (mean power + noise power) through the rectangular N_seg window into the
+  two probes. Removing the block mean of |y|² before the CAF
+  (`cbsfs_dc.py`) shifts the OCDM bias by +1.1e-6 / +1.9e-6 at the WP and
+  +4.3e-6 / +7.2e-6 at 0 dB (paired, se ≤ 5e-8), after which the bias no
+  longer depends on N_seg (2048 vs 1920 consistent with 0 at every SNR).
+  The small noiseless a-dependent part (±3e-7) is not explained by this.
 - σ_e/K_d (4.59e-5 at the WP) was measured at a = 5e-4; the std ratio at
   a = −4.85e-4 (1.07–1.14) suggests it is slightly larger there.
 

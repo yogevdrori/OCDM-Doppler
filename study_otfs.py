@@ -590,6 +590,413 @@ def plot_c(char, charB, sc, offs, P, figd):
 
 
 # ---------------------------------------------------------------------------
+# Part D: multipath
+# ---------------------------------------------------------------------------
+from ocdm_doppler import cbsfs                                  # noqa: E402
+from ocdm_doppler.cbsfs_dc import cost_function_dc              # noqa: E402
+from ocdm_doppler.channel import (exponential_pdp, MultipathChannel,  # noqa
+                                  Path as CPath)
+from ocdm_doppler.channel_norm import normalised_params         # noqa: E402
+from ocdm_doppler.loop_wf2 import run_loop_det, open_loop_det   # noqa: E402
+
+DETS = {"dc": cost_function_dc, "cur": cbsfs.cost_function}
+DET_NAME = {"dc": "DC removed", "cur": "current"}
+# Yogev's Part D settings
+WAVE_D = {
+    "OCDM": dict(N_seg=2048, k=1, dets=("dc", "cur"), spreads=(0, 2, 4, 8),
+                 d_off=2e-4),
+    "OTFS-frame": dict(N_seg=1920, k=2, dets=("dc",),
+                       spreads=(0, 2, 4, 8, 32, 64), d_off=5e-4),
+}
+A_D = 5.1542e-4
+SNRS_D = (float("inf"), WP_DB)
+MS_A1 = 5.1542e-4
+MS_DA = 1e-4
+
+
+def design_d(quick):
+    if quick:
+        return dict(n_ol=4, D=10, L=20, R_fix=1, R_ray=1, n_ms=20,
+                    ms_snap=(2, 18))
+    # option B (Yogev): fixed gains R = 1, Rayleigh R = 2, 200 + 600 blocks
+    # (the first design, R = 2 + 3 and 300 + 1000 blocks, was ~85 min)
+    return dict(n_ol=100, D=200, L=600, R_fix=1, R_ray=2, n_ms=500,
+                ms_snap=(10, 490))
+
+
+def d_channel(spread, gain, r, sidx):
+    """The channel of one Part D realisation (Rayleigh: one draw per r)."""
+    if gain == "fixed":
+        return exponential_pdp(spread, 4)
+    rng = np.random.default_rng([2024, sidx, r])
+    return exponential_pdp(spread, 4, rayleigh=True, rng=rng)
+
+
+def d_cases(d):
+    """(wf, spread index, spread, gain, r, seed) for every realisation."""
+    out = []
+    for w, c in WAVE_D.items():
+        for si, D_max in enumerate(c["spreads"]):
+            gains = ("fixed",) if D_max == 0 else ("fixed", "rayleigh")
+            for g in gains:
+                R = d["R_fix"] if g == "fixed" else d["R_ray"]
+                for r in range(R):
+                    out.append((w, si, D_max, g, r, 1000 + r))
+    return out
+
+
+def _d_name(w, si, g, r):
+    return f"{w}_s{si}_{g}_r{r}"
+
+
+def _d_setup(w, si, D_max, g, r, seed):
+    c = WAVE_D[w]
+    p = base().with_(a_true=A_D)
+    ch = d_channel(D_max, g, r, si)
+    ws = make_wf(w).signal(p, seed)
+    pn, G = normalised_params(ws, ch, p)
+    return c, ch, pn, G
+
+
+def _d_ol_task(args):
+    f, w, si, D_max, g, r, seed, n = args
+    if Path(f).exists():
+        return f, 0.0
+    t0 = time.time()
+    c, ch, pn, G = _d_setup(w, si, D_max, g, r, seed)
+    e = open_loop_det(pn, make_wf(w), ch, ConstantDoppler(A_D),
+                      A_D + np.array([-c["d_off"], 0.0, c["d_off"]]), n,
+                      snrs=SNRS_D, k=c["k"],
+                      dets=[DETS[x] for x in c["dets"]], N_seg=c["N_seg"],
+                      seed=seed)
+    np.savez(f, e=e, G=G, rms=ch.rms_delay_spread(),
+             mx=ch.max_delay_spread())
+    return f, time.time() - t0
+
+
+def _d_loop_task(args):
+    f, w, si, D_max, g, r, seed, n, mus = args
+    if Path(f).exists():
+        return f, 0.0
+    t0 = time.time()
+    c, ch, pn, G = _d_setup(w, si, D_max, g, r, seed)
+    filt = [lf.make_filter(mu, 0.0, 1.0, a_hat0=A_D) for mu in mus]
+    res = run_loop_det(pn, make_wf(w), ch, ConstantDoppler(A_D), filt, n,
+                       snrs=SNRS_D, N_seg=c["N_seg"], ks=c["k"],
+                       dets=[DETS[x] for x in c["dets"]], seed=seed)
+    np.savez(f, a_hat=res.a_hat, G=G)
+    return f, time.time() - t0
+
+
+def ms_channel(p2):
+    """Two paths, delays 2 and 4 samples, powers (1 - p2, p2), Doppler
+    a1 = MS_A1 and a2 = MS_A1 + MS_DA (per path)."""
+    return MultipathChannel([
+        CPath(np.sqrt(1 - p2), 2.0, ConstantDoppler(MS_A1)),
+        CPath(np.sqrt(p2), 4.0, ConstantDoppler(MS_A1 + MS_DA))],
+        label=f"multiscale p2={p2:g}")
+
+
+def _d_ms_task(args):
+    f, p2, n, mus, snaps = args
+    if Path(f).exists():
+        return f, 0.0
+    t0 = time.time()
+    p = base().with_(a_true=MS_A1)
+    ch = ms_channel(p2)
+    wf = make_wf("OCDM")
+    filt = [lf.make_filter(mu, 0.0, 1.0, a_hat0=MS_A1) for mu in mus]
+    dets = [DETS[x] for x in WAVE_D["OCDM"]["dets"]]
+    res = run_loop_det(p, wf, ch, ConstantDoppler(MS_A1), filt, n,
+                       snrs=SNRS_D, N_seg=2048, ks=1, dets=dets, seed=1000)
+    # CAF around the two expected peaks at two time points (noiseless)
+    from ocdm_doppler.channel import rx_block
+    from ocdm_doppler.wf_params import detector_params
+    ws = wf.signal(p, 1000)
+    dp = detector_params(p, ws.P_samp)
+    a_grid = np.linspace(MS_A1 - 3 * MS_DA, MS_A1 + 4 * MS_DA, 141)
+    caf = []
+    for b in snaps:
+        y = rx_block(ws, ch, p, N_C, ConstantDoppler(MS_A1),
+                     start_sample=b * N_C)
+        caf.append([fn(y, (1 + a_grid) / ws.P_samp, dp, N_seg=2048)
+                    for fn in dets])
+    np.savez(f, a_hat=res.a_hat, caf=np.array(caf), a_grid=a_grid,
+             snaps=np.array(snaps))
+    return f, time.time() - t0
+
+
+def d_identity_check():
+    """run_loop_det / open_loop_det with the current detector == the
+    loop_wf versions (bit for bit), OCDM single path and OTFS multipath."""
+    from ocdm_doppler.loop_wf import run_loop_wf, open_loop_e
+    p = base().with_(a_true=A_D)
+    worst = 0.0
+    for w, ch in (("OCDM", single_path(p)),
+                  ("OTFS-frame", exponential_pdp(4, 4))):
+        filt = [lf.make_filter(5.7e-5, 0.0, 1.0, a_hat0=A_D)]
+        r1 = run_loop_det(p, make_wf(w), ch, ConstantDoppler(A_D), filt, 8,
+                          snrs=SNRS_D, N_seg=1920, ks=2,
+                          dets=cbsfs.cost_function, seed=1000)
+        r2 = run_loop_wf(p, make_wf(w), ch, ConstantDoppler(A_D), filt, 8,
+                         snrs=SNRS_D, N_seg=1920, ks=2, seed=1000)
+        worst = max(worst, float(np.max(np.abs(r1.a_hat - r2.a_hat))))
+        e1 = open_loop_det(p, make_wf(w), ch, ConstantDoppler(A_D),
+                           A_D + np.array([-1e-4, 0, 1e-4]), 3, snrs=SNRS_D,
+                           k=2, dets=(cbsfs.cost_function,), N_seg=1920,
+                           seed=1000)
+        e2 = open_loop_e(p, make_wf(w), ch, ConstantDoppler(A_D),
+                         A_D + np.array([-1e-4, 0, 1e-4]), 3, snrs=SNRS_D,
+                         ks=(2,), N_seg=1920, seed=1000)
+        worst = max(worst, float(np.max(np.abs(e1[0] - e2[:, :, 0, :]))))
+    return worst
+
+
+def part_d(args, out, raw, figd, t0):
+    d = design_d(args.quick)
+    cases = d_cases(d)
+    ident = d_identity_check() if not args.replot else float("nan")
+    print(f"  runner identity check: max |diff| = {ident:.1e}", flush=True)
+    if not args.replot:
+        ol = [(str(raw / f"D_ol_{_d_name(w, si, g, r)}.npz"), w, si, D_max,
+               g, r, seed, d["n_ol"]) for w, si, D_max, g, r, seed in cases]
+        if not run_tasks(_d_ol_task, ol, args.procs, "open loop", t0,
+                         args.budget):
+            return
+    # K_d0 per waveform and detector: single path, noiseless
+    Kd0 = {}
+    for w, c in WAVE_D.items():
+        E = np.array([np.load(raw / f"D_ol_{_d_name(w, 0, 'fixed', r)}.npz")
+                      ["e"] for r in range(d["R_fix"])])  # [R, det, s, i, o]
+        for di, x in enumerate(c["dets"]):
+            Kd0[w, x] = float((E[:, di, 0, :, 0] - E[:, di, 0, :, 2]).mean()
+                              / (2 * c["d_off"]))
+    if not args.replot:
+        lt = [(str(raw / f"D_loop_{_d_name(w, si, g, r)}.npz"), w, si, D_max,
+               g, r, seed, d["D"] + d["L"],
+               [(1 - POLE) / Kd0[w, x] for x in WAVE_D[w]["dets"]])
+              for w, si, D_max, g, r, seed in cases]
+        mus_ms = [(1 - POLE) / Kd0["OCDM", x] for x in WAVE_D["OCDM"]["dets"]]
+        ms = [(str(raw / f"D_ms_p{p2:g}.npz"), p2, d["n_ms"], mus_ms,
+               d["ms_snap"]) for p2 in (0.5, 1 / 3)]
+        if not run_tasks(_d_loop_task, lt + [], args.procs, "closed loop",
+                         t0, args.budget):
+            return
+        if not run_tasks(_d_ms_task, ms, args.procs, "multiscale", t0,
+                         args.budget):
+            return
+    analyse_d(d, cases, Kd0, ident, out, raw, figd)
+
+
+def analyse_d(d, cases, Kd0, ident, out, raw, figd):
+    rows = []
+    L_ = ["# Step 7, Part D: multipath", "",
+          "Generated by `study_otfs.py --part D`. Exponential power-delay "
+          "profile, 4 paths uniformly over [0, D_max] samples (fractional "
+          "delays), last path −10 dB, common Doppler a = 5.1542e-4; fixed "
+          f"gains ({d['R_fix']} data seeds) and Rayleigh gains ({d['R_ray']} "
+          "channel draws, one per realisation). Every channel is scaled to "
+          "the mean received signal power of the single-path reference "
+          "(exact expression incl. the cross terms; G = P_ref / P_ch is the "
+          "power factor applied). OCDM: N_seg = 2048, k = 1, DC-removed "
+          "detector (main) and the current detector on the same blocks; "
+          "OTFS-frame: N_seg = 1920, k = 2, DC removed. Open loop: "
+          f"{d['n_ol']} blocks at â = a, a ± d (d = 2e-4 OCDM, 5e-4 "
+          "OTFS-frame); K_d from the secant. Closed loop: first order, pole "
+          "0.99, μ = 0.01 / K_d0 (single path, noiseless, per detector: the "
+          "receiver does not know the channel), "
+          f"{d['L']} blocks after {d['D']}; g_eff = μ K_d(channel, WP).",
+          "", "**Normalisation factor G.** With h_p = A_p0 c_p "
+          "e^{−j2π f_Tx τ_p}/2 (Σ|c_p|² = 1), the exact mean received signal "
+          "power over one period is P_ch = ⟨Σ_pq h_p h_q* R_X(t − τ_p, "
+          "t − τ_q)⟩_t, R_X(t1, t2) = E[X(t1) X*(t2)]; P_ref is the same for "
+          "one path with c = 1. G = P_ref / P_ch, and the channel's amplitude "
+          "A_p0 is multiplied by √G (the received power by G), so every "
+          "channel has the single-path received power and the same effective "
+          "SNR. Without cross terms (paths uncorrelated: integer delay "
+          "differences, or random phases on average) P_ch = P_ref and G = 1; "
+          "G > 1 means the paths' cross terms are negative on average (partial "
+          "cancellation: the received power fell and had to be raised), "
+          "G < 1 that they add constructively.", "",
+          "Captured: max |â − a| over the last 200 loop blocks < 1e-3 (far "
+          "from the false-lock points), per realisation.", "",
+          f"Runner check: run_loop_det / open_loop_det with the current "
+          f"detector vs loop_wf: max |diff| = {ident:.1e}.", "",
+          "K_d0 (single path, noiseless): " + ", ".join(
+              f"{w} {DET_NAME[x]} {v:.1f}" for (w, x), v in Kd0.items()), ""]
+    groups = {}
+    for w, si, D_max, g, r, seed in cases:
+        groups.setdefault((w, si, D_max, g), []).append(r)
+    bsz = 150
+    for w, c in WAVE_D.items():
+        for di, x in enumerate(c["dets"]):
+            L_ += [f"## {w}, {DET_NAME[x]} detector", "",
+                   "| D_max | gains | RMS spread | G (per realisation) | SNR "
+                   "| K_d | K_d / K_d0 | σ_e/K_d | σ_e/K_d rel. to D_max = 0 "
+                   "| g_eff | bias ± se | std | RMSE | captured |",
+                   "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+                   "---|"]
+            sek0 = {}
+            for (w2, si, D_max, g), rs in groups.items():
+                if w2 != w:
+                    continue
+                ols = [np.load(raw / f"D_ol_{_d_name(w, si, g, r)}.npz")
+                       for r in rs]
+                lps = [np.load(raw / f"D_loop_{_d_name(w, si, g, r)}.npz")
+                       for r in rs]
+                Gs = [float(o["G"]) for o in ols]
+                rms = float(np.mean([o["rms"] for o in ols]))
+                for s, snr in enumerate(SNRS_D):
+                    E = np.array([o["e"][di, s] for o in ols])  # [R, i, off]
+                    K = float((E[..., 0] - E[..., 2]).mean()
+                              / (2 * c["d_off"]))
+                    sek = float((E[..., 1] / K).std(ddof=1))
+                    eps = np.array([lp["a_hat"][di, s, d["D"]:d["D"] + d["L"]]
+                                    for lp in lps]) - A_D
+                    nb = eps.shape[1] // bsz
+                    bm = eps[:, :nb * bsz].reshape(len(rs), nb, bsz).mean(-1)
+                    bias = float(eps.mean())
+                    se = float(bm.std(ddof=1) / math.sqrt(bm.size))
+                    g_eff = (1 - POLE) / Kd0[w, x] * K
+                    if D_max == 0:
+                        sek0[s] = sek
+                    rel = sek / sek0[s] if s in sek0 else float("nan")
+                    capt = int(np.sum(np.abs(eps[:, -200:]).max(1) < 1e-3))
+                    L_.append(
+                        f"| {D_max:g} | {g} | {rms:.2f} | "
+                        f"{', '.join(f'{v:.3f}' for v in Gs)} | "
+                        f"{snr_s(snr)} | {K:.1f} | {K / Kd0[w, x]:.3f} | "
+                        f"{sek:.2e} | {rel:.2f} | "
+                        f"{g_eff:.4f} | {bias:+.2e} ± {se:.1e} | "
+                        f"{eps.std():.2e} | "
+                        f"{float(np.sqrt(np.mean(eps ** 2))):.2e} | "
+                        f"{capt}/{len(rs)} |")
+                    rows.append(dict(part="D", waveform=w, detector=x,
+                                     D_max=D_max, gains=g, rms=rms,
+                                     G=";".join(f"{v:.4f}" for v in Gs),
+                                     snr_db=snr, K_d=K, K_rel=K / Kd0[w, x],
+                                     s_ek=sek, s_ek_rel=rel, g_eff=g_eff,
+                                     bias=bias, bias_se=se,
+                                     std=float(eps.std()),
+                                     rmse=float(np.sqrt(np.mean(eps ** 2))),
+                                     captured=f"{capt}/{len(rs)}"))
+            L_.append("")
+    # multiscale
+    L_ += ["## Multiscale (OCDM, two paths with their own Doppler factors)",
+           "",
+           f"Paths at delays 2 and 4 samples, a1 = {MS_A1:.4e}, a2 = a1 + "
+           f"{MS_DA:g}; equal powers and 2:1 (p2 = 1/3); â0 = a1; "
+           f"{d['n_ms']} blocks ({d['n_ms'] * N_C / 4e6:.1f} s). Because "
+           "each path has its own Doppler factor the paths drift apart "
+           f"(relative delay changes by {MS_DA:g}·t, ≈ "
+           f"{MS_DA * d['n_ms'] * N_C:.0f} samples over the run) and their "
+           "cross terms rotate at f_Tx·Δa: this case shows which component "
+           "the loop locks to, not steady-state accuracy. Position in units "
+           "of a2 − a1 (0 = path 1, 1 = path 2; power-weighted mean = p2).",
+           "", "| p2 | detector | SNR | position, blocks 100–200 | "
+           "last 100 blocks | power-weighted mean |", "|---|---|---|---|---|"
+           "---|"]
+    ms_data = {}
+    for p2 in (0.5, 1 / 3):
+        z = np.load(raw / f"D_ms_p{p2:g}.npz")
+        ms_data[p2] = z
+        for di, x in enumerate(WAVE_D["OCDM"]["dets"]):
+            for s, snr in enumerate(SNRS_D):
+                ah = (z["a_hat"][di, s] - MS_A1) / MS_DA
+                n = ah.size - 1
+                mid = ah[min(100, n // 3):min(200, 2 * n // 3)].mean()
+                L_.append(f"| {p2:.3g} | {DET_NAME[x]} | {snr_s(snr)} | "
+                          f"{mid:+.3f} | {ah[-100:].mean():+.3f} | "
+                          f"{p2:.3f} |")
+    L_.append("")
+    (out / "otfs_D.md").write_text("\n".join(L_), encoding="utf-8")
+    keys = sorted({k for r in rows for k in r})
+    with open(out / "otfs_D.csv", "w", newline="") as fh:
+        wr = csv.DictWriter(fh, fieldnames=keys)
+        wr.writeheader()
+        wr.writerows(rows)
+    print("\n".join(L_))
+    plot_d(rows, ms_data, d, figd)
+
+
+def plot_d(rows, ms_data, d, figd):
+    cols = {"OCDM": "#1f77b4", "OTFS-frame": "#d62728"}
+    with plt.rc_context({"font.size": 11}):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4.3))
+        for (w, x), ls in ((("OCDM", "dc"), "-"), (("OCDM", "cur"), ":"),
+                           (("OTFS-frame", "dc"), "-")):
+            for g, mk in (("fixed", "o"), ("rayleigh", "s")):
+                sel = [r for r in rows if r["waveform"] == w and
+                       r["detector"] == x and r["snr_db"] == WP_DB and
+                       (r["gains"] == g or r["D_max"] == 0)]
+                sel.sort(key=lambda r: r["D_max"])
+                if not sel:
+                    continue
+                xs = [max(r["D_max"], 0.5) for r in sel]
+                lab = f"{w}, {DET_NAME[x]}, {g}"
+                axes[0].plot(xs, [r["K_rel"] for r in sel], ls + mk,
+                             color=cols[w], label=lab, mfc="none"
+                             if g == "rayleigh" else None)
+                axes[1].plot(xs, [r["rmse"] for r in sel], ls + mk,
+                             color=cols[w], label=lab, mfc="none"
+                             if g == "rayleigh" else None)
+        for ax in axes:
+            ax.set_xscale("log")
+            ax.set_xlabel("max delay spread D_max [samples] (0 plotted at "
+                          "0.5)")
+            ax.grid(True, which="both", color="0.9", lw=0.5)
+            ax.axvline(4, color="0.6", ls="--", lw=0.8)
+            ax.axvline(64, color="0.6", ls="--", lw=0.8)
+        axes[0].set_ylabel("K_d / K_d0 (WP)")
+        axes[1].set_ylabel("closed-loop RMSE (WP)")
+        axes[1].set_yscale("log")
+        axes[0].set_title("detector gain vs delay spread (dashed: guard "
+                          "lengths 4, 64)", fontsize=10)
+        axes[1].set_title("closed-loop RMSE at the WP", fontsize=10)
+        axes[0].legend(fontsize=7)
+        fig.tight_layout()
+        fig.savefig(figd / "fig_otfs_multipath.png", dpi=150)
+        plt.close(fig)
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
+        for p2, ls in ((0.5, "-"), (1 / 3, "--")):
+            z = ms_data[p2]
+            for di, x in enumerate(WAVE_D["OCDM"]["dets"]):
+                ah = (z["a_hat"][di, 1] - MS_A1) / MS_DA
+                axes[0].plot(np.arange(ah.size) * N_C / 4e6, ah, ls,
+                             lw=1.0 if x == "dc" else 0.7,
+                             label=f"p2 = {p2:.2g}, {DET_NAME[x]}, WP")
+            axes[0].axhline(p2, color="0.5", ls=ls, lw=0.6)
+        axes[0].axhline(0, color="k", lw=0.6)
+        axes[0].axhline(1, color="k", lw=0.6)
+        axes[0].set_xlabel("time [s]")
+        axes[0].set_ylabel("(â − a1) / (a2 − a1)")
+        axes[0].set_title("which path does the loop follow? (grey: power-"
+                          "weighted mean)", fontsize=10)
+        axes[0].legend(fontsize=7)
+        z = ms_data[0.5]
+        for j, ax in enumerate(axes[1:]):
+            for di, x in enumerate(WAVE_D["OCDM"]["dets"]):
+                cf = z["caf"][j, di]
+                ax.plot((z["a_grid"] - MS_A1) / MS_DA, cf / cf.max(),
+                        lw=1.2 if x == "dc" else 0.8,
+                        label=DET_NAME[x])
+            ax.axvline(0, color="k", ls=":", lw=0.8)
+            ax.axvline(1, color="k", ls=":", lw=0.8)
+            ax.set_xlabel("(a − a1) / (a2 − a1)  [α = (1 + a)/20]")
+            ax.set_ylabel("C(α) / max")
+            ax.set_title(f"cost around the two peaks, block "
+                         f"{int(z['snaps'][j])} (noiseless, p2 = 0.5)",
+                         fontsize=10)
+            ax.legend(fontsize=8)
+        for ax in axes:
+            ax.grid(True, color="0.9", lw=0.5)
+        fig.tight_layout()
+        fig.savefig(figd / "fig_otfs_multiscale.png", dpi=150)
+        plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
@@ -616,6 +1023,8 @@ def main():
         part_b(args, out, raw, figd, t0)
     elif args.part == "C":
         part_c(args, out, raw, figd, t0)
+    elif args.part == "D":
+        part_d(args, out, raw, figd, t0)
     else:
         raise SystemExit(f"Part {args.part}: not implemented yet")
     print(f"runtime {time.time() - t0:.0f}s")

@@ -30,6 +30,10 @@ from .waveforms import (Waveform, OCDMWaveform, OTFSWaveform, isfft, sfft)
 from .channel import (Path, MultipathChannel, single_path, exponential_pdp,
                       received, rx_block)
 from .loop_wf import run_loop_wf, open_loop_e
+from .cbsfs_dc import cost_function_dc
+from .channel_norm import (mean_received_power, power_factor,
+                           normalised_params)
+from .loop_wf2 import run_loop_det, open_loop_det
 
 __all__ = [
     "SystemParams",
@@ -77,4 +81,10 @@ __all__ = [
     "rx_block",
     "run_loop_wf",
     "open_loop_e",
+    "cost_function_dc",
+    "mean_received_power",
+    "power_factor",
+    "normalised_params",
+    "run_loop_det",
+    "open_loop_det",
 ]
