@@ -399,8 +399,16 @@ Open items after Step 7:
 - OTFS-frame at the WP: 16–22 % non-linearity over the prior range (not
   DC; neighbouring harmonics?) and a residual −3e-5 closed-loop bias.
 - OCDM noiseless a-dependent bias (±3e-7) not explained by DC leakage.
-- The +3e-6 OCDM bias in fixed-gain multipath (D_max = 2, 4) needs more
-  realisations (follow-up 3).
+- (Closed by the follow-ups, `results/step7_followups.md`): the +3e-6 OCDM
+  bias in fixed-gain multipath was a single-seed fluctuation (16 batches:
+  +0.1e-6 ± 0.5e-6, +0.2e-6 ± 0.7e-6); σ_e/K_d vs delay spread follows the
+  k = 1 harmonic strength of the received mean power (≈ strength^−1.5…−1.9
+  at the WP); the multiscale behaviour is the capture effect (the loop
+  follows the stronger of two unresolved lines).
+- **Statistics caveat:** batch means over 150 blocks (1.5 loop time
+  constants) are correlated, so batch-mean std errs from a single seed are
+  too small; use several seeds (and batches ≥ 3 time constants) before
+  calling a bias significant.
 
 Practical notes (Step 7):
 - **Run with `.venv\Scripts\python.exe`** (see above).

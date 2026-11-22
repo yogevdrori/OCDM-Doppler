@@ -799,6 +799,35 @@ single-path K_d (the receiver does not know the channel).
   samples over the run), so this case is about which component the loop
   follows, not steady-state accuracy.
 
+### Follow-ups (`results/step7_followups.md`, `figures/fig_multiscale_cost.png`)
+
+- **σ_e/K_d follows the harmonic strength.** The k = 1 Fourier coefficient
+  of the exact mean received power after G (analytic; the simulated
+  √(C/C_ref) agrees within 0.5 %) is 1.34–1.65× the single path at
+  D_max = 2, 1.14 (fixed) / 0.73–0.78 (Rayleigh) at D_max = 4 and
+  0.79–0.89 at D_max = 8. The σ_e/K_d ratios move the same way in every
+  channel but more steeply: at the WP roughly σ_e/K_d ∝ strength^(−1.5…−1.9)
+  (between the 1/|c| of a signal-dominated and the 1/|c|² of a
+  noise-dominated detector, as in Part C). This explains both the 0.48× at
+  D_max = 2 (stronger harmonic) and the 1.2–1.8× at D_max = 4–8.
+- **Multiscale = capture effect.** Units: δ = 0.25/N_seg is in α, not in
+  a; in a the main lobe of C(â) is about ±P_samp/N_seg = ±9.8e-3 wide, so
+  Δa = 1e-4 is 1 % of it (unresolved). The two harmonics act as one line
+  1 + r e^{jψ} whose phase ψ turns every ~8 blocks; the detector follows
+  its instantaneous frequency, whose average over ψ is exactly the stronger
+  path for r < 1 (winding number 0), not the power-weighted point. 2:1
+  (r = 0.5): per-block lock points spread over −0.93 … +0.56 of Δa (model
+  −1 … +0.33), mean +0.014 (model 0), loop +0.025. Equal powers: the sum
+  passes through zero, the mean is 0.50 but the loop wanders.
+- **The +3e-6 OCDM bias in fixed-gain multipath is not confirmed.** With
+  3 more seeds (16 batches): D_max = 2 +0.11e-6 ± 0.54e-6, D_max = 4
+  +0.24e-6 ± 0.66e-6 (DC removed, WP); the new seeds alone give −0.9e-6 /
+  −0.6e-6. Part D's single seed was a fluctuation, and its error bars were
+  too small: batches of 150 blocks are only 1.5 loop time constants long,
+  so the batch means are correlated and the batch-mean std err
+  underestimates the error (the same caveat applies to Part D's other
+  single-seed biases, e.g. OTFS-frame's −3e-5).
+
 **Feasibility conclusion for the advisor meeting:** the detector works
 unchanged on OTFS with a guard per symbol (equal or better than OCDM), works
 but is ~10× noisier with one guard per frame (needs N_seg a multiple of
