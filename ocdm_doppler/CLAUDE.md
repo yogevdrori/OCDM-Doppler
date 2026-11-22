@@ -78,11 +78,15 @@ rather than just re-reading the papers:
 5. **Step 5 (done)** — tracking a time-varying Doppler a(t) and the choice
    of loop pole (task file `../tasks/step5_time_varying_doppler.md`), built
    in new modules without changing `signal_model.py`.
-6. **Step 6 (in progress)** — second-order tracking loop vs first-order
+6. **Step 6 (paused)** — second-order tracking loop vs first-order
    (task file `../tasks/step6_second_order_loop.md`): Parts A and B done,
    C–E and the robustness check pending.
+7. **Step 7 (done)** — other multi-basis waveforms (OTFS) and multipath
+   (task file `../tasks/step7_otfs_multipath.md`; advisor's first
+   priority). Next priorities from the advisor: complexity reduction and
+   the comparison with the literature (`../docs/literature.md`).
 
-## Status: Steps 1–5 complete, Step 6 Parts A–B done (Step 1 details below)
+## Status: Steps 1–5 and 7 complete, Step 6 paused after Parts A–B (Step 1 details below)
 
 Package `ocdm_doppler/` (this directory), pure NumPy, no third-party deps
 beyond `numpy`. 10/10 sanity checks pass (`python verify_infrastructure.py`;
@@ -335,6 +339,74 @@ Practical notes (Step 6):
 - One round stalled for 46 min (machine asleep or swapping); a call that
   outlives 10 min moves to the background but still stops cleanly at the
   budget check.
+
+### Step 7 (done; "add, do not change")
+
+Allowed edits: `__init__.py` exports, `README.md`, this file. The code was
+tied to OCDM in three places; each is solved with new code:
+- the cycle-frequency period `SystemParams.N_sym` → `wf_params.WaveformParams`
+  (`N_sym` returns the waveform's mean-power period `P_samp`), passed **only
+  to the detector** (identical integer 20 for OCDM);
+- `OCDMSignal._chirp_sum` / `LongSignal` → the waveform layer;
+- single-path `rx` → the channel layer, with **OCDM single path delegated
+  to the old code** (bit-identical, as Step 5 did for constant Doppler).
+
+| file | contents |
+|---|---|
+| `wf_params.py` | `WaveformParams(SystemParams)` with field `P_samp`; `detector_params(params, P_samp)` |
+| `waveforms.py` | `Waveform` specs → per-realisation signals with `tx(u)` (exact at any time), `P_samp`, `mean_power(u)`, `autocorr(t1, t2)` = E[X(t1)X*(t2)]. `OCDMWaveform` wraps `loop.LongSignal`. `OTFSWaveform(M=16, N=16, N_gi=4, guard="symbol"/"frame")`: X_dd (delay l × Doppler k, BPSK, lazy seeded chunks of 256 frames, stream [seed, 0x07F5, chunk]) → `isfft` (unitary: fft over delay, ifft over Doppler, norm="ortho") → x(t) = (1/√M) Σ_m X_tf[m,n] e^{j2π(m − M/2) r/T_is}; `demod` inverts it (fft of y·(−1)^i, then `sfft`). Guard "symbol": N_gi zeros per slot (P_samp 20); "frame": N·N_gi zeros per frame (P_samp 320). Same per-active-sample power σ_D² as OCDM. |
+| `channel.py` | `Path(gain, delay [samples, fractional], profile=None)`, `MultipathChannel(paths)` (gains normalised Σ|c|² = 1), `single_path`, `exponential_pdp(D_max, P=4, decay_db=10, rayleigh, rng)`; Y(t) = Σ_p h_p e^{jφ_p(t)} X(t + A_p(t) − τ_p), h_p = A_p0 c_p e^{−j2πf_Tx τ_p}/2, φ_p = 2π((f_Tx − f_Rx)t + f_Tx A_p(t)) + φ_Tx − φ_Rx; `received`, `rx_block`. |
+| `channel_norm.py` | `mean_received_power` (exact, incl. cross terms; diagonal only for per-path Doppler), `power_factor` G = P_ref/P_ch, `normalised_params` (A_p0 × √G). Yogev's rule for Part D: every channel at the single-path received power (fractional delays add partly coherently). |
+| `loop_wf.py` | `run_loop_wf(params, waveform, channel, profile, filters, …, ks)` (harmonic per filter), `open_loop_e`; same noise stream and lockstep as `run_loop_filters`, which it reproduces bit for bit for OCDM single path. |
+| `loop_wf2.py` | `run_loop_det` / `open_loop_det`: as `loop_wf` with a cost function per filter (`dets`). |
+| `cbsfs_dc.py` | `cost_function_dc`: cbsfs cost with the block mean of each lag product (|y|²) subtracted before the segmented CAF; `remove_dc=False` = `cbsfs.cost_function` bit for bit. |
+| `../verify_step7.py` | Part A checks → `../results/verify_step7.md` (all pass) |
+| `../study_otfs.py` | `--part B/C/D` → `../results/otfs_{B,C,D}.md/.csv`, raw `results/otfs_raw/`; pool tasks save per task / realisation; `--resume`, `--replot`, `--budget`, `--procs`, `--quick` |
+| `../check_nseg_leakage.py`, `../check_dc_removal.py` | the leakage checks (paired on the same blocks) |
+| `../count_ops_lag0.py` | Yogev's explicit real-multiplication count of one Δ = {0} update (495,244 RM = 20.635 RM/sample, bit-exact vs `early_late`) |
+
+Outcome (details in README *Step 7 results*):
+- Verification: OCDM through the new layers bit-identical; OTFS demod exact;
+  OTFS WP 4.04 dB = theory = OCDM.
+- OTFS-symbol = OCDM in K_d, pull-in and closed loop; lower detector
+  self-noise (σ_e/K_d 0.41× noiseless, 0.79× WP).
+- OTFS-frame: best k = 2 (predicted from the on/off Fourier coefficients);
+  ~10× noisier than OCDM; with N_seg = 2048 a large SNR-growing bias.
+- **Detector bias = leakage through the rectangular N_seg window**: N_seg a
+  multiple of P_samp (1920) reduces it for OTFS-frame; removing the DC
+  line (`cbsfs_dc.py`) removes the SNR-dependent part of the OCDM bias
+  (open item since Step 4, closed) and makes the bias independent of N_seg.
+- Multipath (power-normalised, μ from the single-path K_d): K_d unchanged
+  by delay spread; σ_e/K_d at the WP 0.48–1.72× single path (OCDM),
+  1.05–1.55× (OTFS-frame up to D_max = 64); always locked. OCDM fixed gains
+  D_max = 2, 4: +3e-6 WP bias (one realisation, to be confirmed).
+- Multiscale (Δa = 1e-4): the loop follows the stronger path (2:1); equal
+  powers: it wanders.
+
+Decisions Yogev took in Step 7:
+- Gains normalised per realisation; then (after check 5) every Part D
+  channel scaled to the exact single-path received power (G reported).
+- PDP: P = 4, fractional delays uniform over D_max, last path −10 dB;
+  μ from the single-path K_d (effective pole reported).
+- Multiscale: physical (paths drift apart), short (3 s), which path the
+  loop follows; plus a 2:1 power case.
+- Part C: μ from the noiseless K_d; k = 5 open loop only (c_5 = 0).
+- Part D: OTFS-frame N_seg = 1920, k = 2, DC removed; OCDM N_seg = 2048 with
+  DC removal as the main detector, the current one on the same blocks;
+  run size option B (fixed × 1 + Rayleigh × 2, 100 + 200 + 600 blocks).
+
+Open items after Step 7:
+- OTFS-frame at the WP: 16–22 % non-linearity over the prior range (not
+  DC; neighbouring harmonics?) and a residual −3e-5 closed-loop bias.
+- OCDM noiseless a-dependent bias (±3e-7) not explained by DC leakage.
+- The +3e-6 OCDM bias in fixed-gain multipath (D_max = 2, 4) needs more
+  realisations (follow-up 3).
+
+Practical notes (Step 7):
+- **Run with `.venv\Scripts\python.exe`** (see above).
+- Multipath block generation dominates the cost (one waveform evaluation
+  per path): OCDM 4 paths ~0.1–0.3 s/block, OTFS-frame ~0.29 s/block per
+  worker; timings on this machine vary 2–4× between runs.
 
 `study_cbsfs_accuracy.py` is the sweep script that produced the numeric
 tables in the README (record length `M`, segment length `N_seg`, harmonic
