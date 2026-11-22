@@ -828,6 +828,61 @@ single-path K_d (the receiver does not know the channel).
   underestimates the error (the same caveat applies to Part D's other
   single-seed biases, e.g. OTFS-frame's −3e-5).
 
+### Audit of the bias standard errors (`results/bias_se_audit.md`)
+
+`audit_bias_se.py` recomputes the std err of every closed-loop bias from the
+saved raw data. The loop output is correlated over τ_int ≈ 1/B_L blocks
+(199 for g = 0.01), so the valid std err is ≈ (σ_e/K_d)/√N; corrected =
+batch means of ≥ 10τ (≥ 8 batches), else the data-driven τ_int, else
+max(model, τ_int). 268 figures; median corrected/old ratio: Step 4 D 0.89,
+Step 5 B 1.01, N_seg closed loop 1.10, Step 7 D 1.18 (batches of 150 were
+too short), **Step 6 B 5.2 and Step 7 B 1.6** (only R = 2 realisations: the
+old se had one degree of freedom). 41 figures change significance at 2σ or
+3σ. What it means for the claims:
+- **Step 6 Part B:** the "−1.0e-6 / −1.9e-6 WP bias, identical for all
+  loops" was quoted at 7–18σ; corrected 1.4–2.5σ. The bias is there (same
+  sign, same size as the DC leakage) but each figure is only ~2σ.
+- **The SNR-dependent OCDM bias and its removal by DC subtraction stand:**
+  Step 4's lag-0 biases keep or gain significance (a = 1e-4: 4.4–5.8σ for
+  SNR ≤ 7.5 dB); the DC-removal check is open loop with independent
+  blocks (τ_int = 0.6–1.4), and its paired DC − current shifts are
+  100–1000σ; the N_seg closed-loop paired differences stay at 10–16σ.
+- **Frozen phase** (`bias_phase_check.md`, no raw data; model se from the
+  Step 4 runs): the noiseless biases at integer a·N_c stay significant
+  (6–14σ) and the non-integer ones are ≤ 1.7σ except 1.15e-4 and
+  2.65e-4 (3–5σ); at 4 dB the non-integer biases (−1.2…−1.9e-6) are
+  2.9–4.6σ — the SNR-dependent (DC-leakage) part. The conclusion holds.
+- Step 6 Part A's ramp lags (no raw data): 1st order −6.63e-6 vs
+  −6.51e-6 drops from 1.9σ to 0.8σ; 2nd order −1.1e-7 vs 0 from 1.7σ to
+  0.7σ (both agree with the prediction even better).
+- Lesson: use several independent seeds, batches ≥ 10τ, or the τ_int
+  correction; never the spread of 2 realisation means.
+
+### Accuracy vs computational cost (`results/cost_accuracy.md`, `figures/fig_cost_accuracy.png`)
+
+DC-removed detector, OCDM, open loop over N_c ∈ {6000 … 48000} × N_seg ∈
+{512 … 4096} (N_c ≥ 4 N_seg), prediction at a fixed physical noise
+bandwidth B = 0.84 Hz (the WP design), duty cycle M ∈ {1, 2, 4}.
+- **Cost:** RM/update = 22 N_c − 16 N_seg + 12 (+1 DC removal; = Yogev's
+  counter): 19.3–21.8 RM/sample, i.e. 77–87 M RM/s at M = 1 for every
+  pair. Only M changes the cost substantially.
+- **N_seg is the accuracy lever:** K_d ∝ N_seg (44 / 88 / 175.5 / 351.5);
+  σ_e/K_d at the WP (N_c = 24000) 2.5e-4 / 1.1e-4 / 4.6e-5 / 3.4e-5;
+  capture half-width ∝ 1/N_seg (measured ±0.042 / 0.021 / 0.0105 /
+  0.0053, 7 % beyond P_samp/N_seg) — still ≫ the prior |a| ≤ 1e-3.
+- **At fixed B, RMSE is not quite independent of N_c:** σ_e/K_d·√N_c falls
+  with N_c (e.g. N_seg 2048, WP: 1.06e-2 / 7.2e-3 / 6.4e-3 for N_c 12k /
+  24k / 48k), most where N_c is close to 4 N_seg (the CAF stage loses
+  2 N_seg samples per block); longer blocks are more efficient per sample.
+- **Duty cycle:** the prediction costs √M in RMSE for 1/M in cost; the
+  closed loop at M = 4 measured 1.6× (WP) / 1.8× (noiseless) the M = 1
+  RMSE (ratios to prediction 0.83 ± 0.10 / 0.87 ± 0.10).
+- **Closed-loop checks** (4 points, R = 3): measured std / predicted =
+  0.83–1.06 (± 0.10–0.11).
+- **Best trade-off found:** N_c = 48000, N_seg = 4096, M = 4: predicted WP
+  RMSE ≈ 3.1e-6 at 21 M RM/s — the accuracy of the current design
+  (3.3e-6 measured) at ~1/4 of its cost, with capture ±5e-3.
+
 **Feasibility conclusion for the advisor meeting:** the detector works
 unchanged on OTFS with a guard per symbol (equal or better than OCDM), works
 but is ~10× noisier with one guard per frame (needs N_seg a multiple of

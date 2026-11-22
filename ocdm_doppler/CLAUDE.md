@@ -405,10 +405,19 @@ Open items after Step 7:
   k = 1 harmonic strength of the received mean power (≈ strength^−1.5…−1.9
   at the WP); the multiscale behaviour is the capture effect (the loop
   follows the stronger of two unresolved lines).
-- **Statistics caveat:** batch means over 150 blocks (1.5 loop time
-  constants) are correlated, so batch-mean std errs from a single seed are
-  too small; use several seeds (and batches ≥ 3 time constants) before
-  calling a bias significant.
+- **Statistics caveat (audited, `../audit_bias_se.py` →
+  `results/bias_se_audit.md`):** the loop output is correlated over
+  τ_int ≈ 1/B_L blocks, so the valid std err of a bias is ≈ (σ_e/K_d)/√N.
+  Batch means need batches ≥ 10τ; the spread of R = 2 realisation means is
+  useless (Step 6 B se were 5× too small in the median, up to 50×). Use
+  several seeds, batches ≥ 10τ or the τ_int correction. The DC-leakage
+  conclusion (open-loop paired, independent blocks) and the frozen-phase
+  conclusion survive the audit; Step 6 B's WP biases drop to ~2σ each.
+- Accuracy vs cost (`../study_cost_accuracy.py` → `results/cost_accuracy.md`):
+  RM/update = 22 N_c − 16 N_seg + 12 (+1 DC removal); cost ≈ 77–87 M RM/s at
+  any (N_c, N_seg), only the duty cycle M reduces it; N_seg is the accuracy
+  lever (K_d ∝ N_seg, capture ∝ 1/N_seg). N_c = 48000, N_seg = 4096, M = 4
+  matches the current WP accuracy at ~1/4 of the cost.
 
 Practical notes (Step 7):
 - **Run with `.venv\Scripts\python.exe`** (see above).
