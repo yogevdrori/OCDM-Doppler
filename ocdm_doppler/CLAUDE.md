@@ -417,7 +417,16 @@ Open items after Step 7:
   RM/update = 22 N_c − 16 N_seg + 12 (+1 DC removal); cost ≈ 77–87 M RM/s at
   any (N_c, N_seg), only the duty cycle M reduces it; N_seg is the accuracy
   lever (K_d ∝ N_seg, capture ∝ 1/N_seg). N_c = 48000, N_seg = 4096, M = 4
-  matches the current WP accuracy at ~1/4 of the cost.
+  matches the current WP accuracy at ~1/4 of the cost — **validated**
+  (`../study_design_validation.py` → `results/design_validation.md`): WP
+  RMSE 2.71e-6 vs 3.32e-6 (current), no frozen-phase bias > 1e-6 on a fine a
+  grid, same ramp lag and RMSE as the current design.
+- Report corrections for Sec. 4 (Step 4 Part D + bias-phase table):
+  `../report_corrections.py` → `results/report_corrections.md`,
+  `figures/fig_loop_bias_vs_snr_corr.png` (original figure kept).
+- The machine can sleep during long runs (Step 6, Step 7 validation: ~50 min
+  stall). Budget checks run only between pool tasks: keep tasks shorter than
+  ~1/3 of the budget.
 
 Practical notes (Step 7):
 - **Run with `.venv\Scripts\python.exe`** (see above).

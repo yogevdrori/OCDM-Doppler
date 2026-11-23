@@ -883,6 +883,29 @@ bandwidth B = 0.84 Hz (the WP design), duty cycle M ∈ {1, 2, 4}.
   RMSE ≈ 3.1e-6 at 21 M RM/s — the accuracy of the current design
   (3.3e-6 measured) at ~1/4 of its cost, with capture ±5e-3.
 
+### Report corrections and validation of the low-cost design
+
+- `results/report_corrections.md` (no new simulation): the Step 4 Part D
+  and bias-phase numbers of the report with corrected std errs; the
+  high-SNR bias floor is **7.8–22.2** (was 7–19) std errs from zero;
+  `figures/fig_loop_bias_vs_snr_corr.png` = the bias-vs-SNR plot with the
+  corrected error bars (original kept).
+- `results/design_validation.md` (`study_design_validation.py`): the
+  design **N_c = 48000, N_seg = 4096, M = 4** (DC removed, same physical
+  noise bandwidth, g = 0.077 per 48 ms update) vs the current one:
+  - accuracy: WP RMSE **2.71e-6** (predicted 3.11e-6; current design
+    3.32e-6), noiseless 1.09e-6 (current 1.12e-6), at **20.6 vs 82.5 M
+    RM/s**; bias −1.5e-7 ± 2.0e-7 (6 seeds, batches ≥ 10τ);
+  - frozen phase (noiseless, 25 values of a around 5e-4): no point with
+    |bias| > 1e-6 for the new design (largest +0.67e-6 ± 0.39e-6 at an
+    exact integer a·M·N_c); the current design shows the frozen-phase
+    spike at a = 5e-4 (+1.19e-6 against ≈ −0.7e-6 at its neighbours) and a
+    systematic ≈ −0.7e-6 elsewhere on this grid;
+  - tracking (Step 5 ramp r = 1): bias-free lag −3.50e-6 / −3.56e-6
+    (noiseless / WP; predicted −3.36e-6) vs −3.48e-6 / −3.00e-6 for the
+    current design; RMSE 4.55e-6 vs 4.52e-6 at the WP — the same tracking
+    at a quarter of the cost.
+
 **Feasibility conclusion for the advisor meeting:** the detector works
 unchanged on OTFS with a guard per symbol (equal or better than OCDM), works
 but is ~10× noisier with one guard per frame (needs N_seg a multiple of
