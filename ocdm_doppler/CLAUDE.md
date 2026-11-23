@@ -399,6 +399,9 @@ Open items after Step 7:
 - OTFS-frame at the WP: 16–22 % non-linearity over the prior range (not
   DC; neighbouring harmonics?) and a residual −3e-5 closed-loop bias.
 - OCDM noiseless a-dependent bias (±3e-7) not explained by DC leakage.
+- Noiseless, DC-removed, current design (24000/2048): steady ≈ −0.7e-6
+  bias around a ≈ 5e-4, absent in the 48000/4096/M=4 design; cause
+  unknown (`results/design_validation.md`, part 2).
 - (Closed by the follow-ups, `results/step7_followups.md`): the +3e-6 OCDM
   bias in fixed-gain multipath was a single-seed fluctuation (16 batches:
   +0.1e-6 ± 0.5e-6, +0.2e-6 ± 0.7e-6); σ_e/K_d vs delay spread follows the
